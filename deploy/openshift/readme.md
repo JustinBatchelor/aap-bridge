@@ -52,6 +52,10 @@ interactively, review the source, and build from a committed revision:
 ```bash
 podman login registry.redhat.io
 podman login quay.io
+```
+
+(optional) If you need to build the images 
+```bash
 REVISION=$(git rev-parse --short=12 HEAD)
 API_IMAGE=quay.io/jbatchel/aap-bridge-api
 UI_IMAGE=quay.io/jbatchel/aap-bridge-ui
