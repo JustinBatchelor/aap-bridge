@@ -1,0 +1,11 @@
+FROM registry.redhat.io/ubi9/ubi-minimal:latest
+RUN microdnf install -y python3.12 python3.12-pip python3.12-devel libpq-devel gcc tar && microdnf clean all
+WORKDIR /app
+COPY pyproject.toml README.md LICENSE ./
+COPY src/ src/
+COPY config/ config/
+RUN pip3.12 install --no-cache-dir '.[api]' &&     mkdir -p /data /app/exports /app/xformed /app/reports /app/logs /app/schemas /app/backups &&     chgrp -R 0 /app /data && chmod -R g=u /app /data
+ENV HOME=/tmp PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+USER 1001
+EXPOSE 8000
+ENTRYPOINT ["aap-bridge", "serve", "--host", "127.0.0.1", "--port", "8000"]

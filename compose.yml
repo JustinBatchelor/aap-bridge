@@ -1,3 +1,7 @@
+# Per-service keep-id user namespaces cannot be combined with Podman pods.
+x-podman:
+  in_pod: false
+
 services:
   db-init:
     image: registry.redhat.io/ubi9/ubi-minimal:latest

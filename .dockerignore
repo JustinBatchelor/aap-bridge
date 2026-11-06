@@ -29,3 +29,9 @@ web/dist
 .claude/
 .codex/
 .gemini/
+
+# OpenShift local credentials, overlays, backups, and validation evidence
+deploy/openshift/local/
+.env.*
+!.env.example
+.venv*/

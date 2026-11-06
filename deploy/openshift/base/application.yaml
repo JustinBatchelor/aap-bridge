@@ -1,0 +1,222 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aap-bridge
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: aap-bridge
+  template:
+    metadata:
+      labels:
+        app: aap-bridge
+    spec:
+      serviceAccountName: aap-bridge
+      securityContext:
+        fsGroupChangePolicy: OnRootMismatch
+      terminationGracePeriodSeconds: 60
+      initContainers:
+      - name: initialize-data
+        image: aap-bridge-api
+        securityContext: &id001
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        command:
+        - python3.12
+        - -c
+        - from pathlib import Path; [Path('/data', p).mkdir(exist_ok=True) for p in
+          ('exports','xformed','schemas','reports','logs','backups')]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: artifacts
+          mountPath: /data
+      - name: wait-for-database
+        image: aap-bridge-api
+        securityContext: *id001
+        env:
+        - &id002
+          name: MIGRATION_STATE_DB_PATH
+          valueFrom:
+            secretKeyRef:
+              name: aap-bridge
+              key: MIGRATION_STATE_DB_PATH
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        command:
+        - python3.12
+        - -c
+        - "import os,time,sys\nfrom sqlalchemy import create_engine,text\ne=create_engine(os.environ['MIGRATION_STATE_DB_PATH'],connect_args={'connect_timeout':3})\n\
+          for i in range(60):\n try:\n  with e.connect() as c: c.execute(text('SELECT\
+          \ 1'))\n  sys.exit(0)\n except Exception: time.sleep(2)\nsys.exit('Database\
+          \ not ready after 60 attempts')"
+      containers:
+      - name: api
+        image: aap-bridge-api
+        securityContext: *id001
+        env:
+        - *id002
+        - name: AAP_BRIDGE_TOKEN_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aap-bridge
+              key: AAP_BRIDGE_TOKEN_ENCRYPTION_KEY
+        - name: AAP_BRIDGE_CONFIG
+          value: /etc/aap-bridge/config.yaml
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: '2'
+            memory: 4Gi
+        volumeMounts:
+        - name: artifacts
+          mountPath: /data
+        - name: config
+          mountPath: /etc/aap-bridge
+          readOnly: true
+        - name: api-tmp
+          mountPath: /tmp
+        startupProbe:
+          exec: &id003
+            command:
+            - python3.12
+            - -c
+            - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/versions',
+              timeout=3).read()
+          timeoutSeconds: 5
+          periodSeconds: 10
+          failureThreshold: 60
+        readinessProbe:
+          exec: *id003
+          timeoutSeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          exec: *id003
+          timeoutSeconds: 5
+          periodSeconds: 10
+          failureThreshold: 6
+      - name: ui
+        image: aap-bridge-ui
+        securityContext: *id001
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+        volumeMounts:
+        - name: ui-tmp
+          mountPath: /tmp
+        startupProbe:
+          exec: &id004
+            command:
+            - curl
+            - --fail
+            - --silent
+            - --max-time
+            - '3'
+            - http://127.0.0.1:8080/
+          timeoutSeconds: 5
+          periodSeconds: 10
+          failureThreshold: 30
+        readinessProbe:
+          exec: *id004
+          timeoutSeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          exec: *id004
+          timeoutSeconds: 5
+          periodSeconds: 10
+          failureThreshold: 6
+      - name: oauth-proxy
+        image: oauth-proxy
+        securityContext: *id001
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        args:
+        - --provider=openshift
+        - --openshift-service-account=aap-bridge
+        - --https-address=:8443
+        - --http-address=
+        - --upstream=http://127.0.0.1:8080
+        - --email-domain=*
+        - --skip-provider-button=true
+        - --cookie-secret-file=/etc/oauth/cookie-secret
+        - --cookie-secure=true
+        - --cookie-samesite=lax
+        - --tls-cert=/etc/tls/tls.crt
+        - --tls-key=/etc/tls/tls.key
+        - --openshift-sar={"namespace":"$(POD_NAMESPACE)","resource":"services","resourceName":"aap-bridge","verb":"get"}
+        ports:
+        - name: https
+          containerPort: 8443
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        volumeMounts:
+        - name: tls
+          mountPath: /etc/tls
+          readOnly: true
+        - name: oauth
+          mountPath: /etc/oauth
+          readOnly: true
+        readinessProbe:
+          httpGet:
+            path: /oauth/healthz
+            port: 8443
+            scheme: HTTPS
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /oauth/healthz
+            port: 8443
+            scheme: HTTPS
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+      volumes:
+      - name: artifacts
+        persistentVolumeClaim:
+          claimName: aap-bridge-data
+      - name: config
+        configMap:
+          name: aap-bridge-config
+      - name: tls
+        secret:
+          secretName: aap-bridge-tls
+      - name: oauth
+        secret:
+          secretName: aap-bridge-oauth
+      - name: api-tmp
+        emptyDir: {}
+      - name: ui-tmp
+        emptyDir: {}
