@@ -113,9 +113,7 @@ verified vendor digest. A registry-authenticated Podman pull followed by
 
 ### Choose a version tag or a digest
 
-Kustomize already supports both forms; no application code changes are needed.
-Choose one selector per image entry. Quote tag values so YAML does not interpret
-numeric-looking revision tags as numbers:
+Leave in place unless you are targeting a new containerimage hosted in a different repo+tag
 
 ```yaml
 # Version/tag: renders quay.io/jbatchel/aap-bridge-api:810925561e26
@@ -124,23 +122,6 @@ images:
     newName: quay.io/jbatchel/aap-bridge-api
     newTag: "810925561e26"
 ```
-
-Or replace `newTag` with the corresponding image digest:
-
-```yaml
-# Digest: renders quay.io/jbatchel/aap-bridge-api@sha256:...
-images:
-  - name: aap-bridge-api
-    newName: quay.io/jbatchel/aap-bridge-api
-    digest: sha256:dd297caaef1acfdfbff25afe359980213407b6e1444d596d4b0911f2186623cd
-```
-
-Apply the same choice independently to the UI using its own tag or digest.
-`latest` is a literal tag, not a request to find the newest published version.
-The application repositories publish source-revision tags; they currently have
-no `latest` tag. `digest: latest` is invalid, and `newTag: sha256:...` produces
-an invalid image reference. Prefer digests when an installation must remain pinned
-to exact image contents. See the [Kustomize image reference](https://github.com/kubernetes-sigs/kustomize/blob/master/site/content/en/docs/Reference/API/Kustomization%20File/images.md).
 
 The `name` field must match the image in the base manifests: `aap-bridge-api`,
 `aap-bridge-ui`, `oauth-proxy`, or `registry.redhat.io/rhel9/postgresql-15`.
