@@ -6,7 +6,7 @@ resources:
 images:
   - name: aap-bridge-api
     newName: quay.io/jbatchel/aap-bridge-api
-    newTag: "810925561e26"
+    newTag: "7dfdbd0ced9e-dburl-bf53540d89"
   - name: aap-bridge-ui
     newName: quay.io/jbatchel/aap-bridge-ui
     newTag: "810925561e26"

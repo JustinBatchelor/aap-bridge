@@ -17,7 +17,7 @@ from sqlalchemy import func
 
 from aap_migration.client.exceptions import StateError
 from aap_migration.config import StateConfig
-from aap_migration.migration.database import get_session, init_database
+from aap_migration.migration.database import get_session, init_database, normalize_database_url
 from aap_migration.migration.models import IDMapping, MigrationProgress
 from aap_migration.utils.logging import get_logger, redact_database_url
 
@@ -106,13 +106,7 @@ class MigrationState:
 
         # Initialize database
         try:
-            # Support both full database URLs and file paths
-            if config.db_path.startswith(("postgresql://", "sqlite://", "mysql://")):
-                # Already a full database URL, use as-is
-                self.database_url = config.db_path
-            else:
-                # Treat as SQLite file path
-                self.database_url = f"sqlite:///{config.db_path}"
+            self.database_url = normalize_database_url(config.db_path)
 
             init_database(
                 self.database_url,

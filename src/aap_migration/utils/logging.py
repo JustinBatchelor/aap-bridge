@@ -323,8 +323,12 @@ def redact_database_url(url: str) -> str:
     Returns:
         URL with username and password replaced by ``***``, or the original value for SQLite
     """
-    if not url or url.startswith("sqlite"):
+    if not url:
         return url
+    if url.startswith("sqlite"):
+        # A malformed SQLite path may contain a credential-bearing database URL.
+        # Do not expose it through the normal SQLite passthrough.
+        return "[REDACTED]" if url.count("://") > 1 else url
 
     from urllib.parse import urlparse, urlunparse
 

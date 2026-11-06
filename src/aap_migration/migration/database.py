@@ -7,6 +7,7 @@ thread safety.
 """
 
 import os
+import re
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,7 +28,7 @@ _SessionFactory: sessionmaker | None = None
 
 def normalize_database_url(db_path: str) -> str:
     """Return a SQLAlchemy-compatible URL from a DSN or filesystem path."""
-    if db_path.startswith(("postgresql://", "sqlite://", "mysql://")):
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9_+.-]*://", db_path):
         return db_path
     return f"sqlite:///{db_path}"
 
