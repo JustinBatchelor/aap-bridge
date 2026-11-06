@@ -23,7 +23,7 @@ the workload directly using `oc exec` or port forwarding.
 Requirements:
 
 - OpenShift 4.x with integrated OAuth, ingress, and service-serving certificates.
-- `oc`, Podman, Python 3, registry credentials, and permission to create a project,
+- `oc`, Podman, Python 3 with PyYAML, registry credentials, and permission to create a project,
   namespaced workloads, Secrets, Roles, NetworkPolicies and PVCs.
 - An amd64 worker (the documented builds target linux/amd64).
 - A dynamic storage class that permits writes by the SCC-assigned UID/fsGroup.
@@ -124,16 +124,17 @@ patches:
 ```
 
 Generate Secrets once for a new installation. The script creates a mode-0600
-file, refuses to overwrite it, and does not print secret values:
+multi-document YAML file, refuses to overwrite it, and does not print secret values.
+Use the project virtual environment if your system Python does not provide PyYAML:
 
 ```bash
 python3 deploy/openshift/generate-secrets.py --namespace "$NAMESPACE"
-oc create -n "$NAMESPACE" -f deploy/openshift/local/secrets.json
+oc create -n "$NAMESPACE" -f deploy/openshift/local/secrets.yaml
 ```
 
 `secrets.example.yaml` describes required keys and is deliberately excluded from
-Kustomize. Never apply its placeholders. The generated database URL uses a
-hexadecimal password to avoid URL escaping problems. For manually supplied
+Kustomize. Never apply its placeholders. The generated database URL explicitly selects `postgresql+psycopg2://`, matching
+the installed driver, and uses a hexadecimal password to avoid URL escaping problems. For manually supplied
 credentials, percent-encode the username/password in the URL.
 
 Retain the encryption key securely with database backups. Replacing it makes
