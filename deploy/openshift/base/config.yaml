@@ -1,0 +1,16 @@
+paths:
+  export_dir: /data/exports
+  transform_dir: /data/xformed
+  schema_dir: /data/schemas
+  report_dir: /data/reports
+  backup_dir: /data/backups
+  ignored_endpoints_file: /app/config/ignored_endpoints.yaml
+  mappings_file: /app/config/mappings.yaml
+logging:
+  level: INFO
+  format: json
+  file: /data/logs/migration.log
+performance:
+  memory_limit_mb: 3072
+state:
+  db_path: ${MIGRATION_STATE_DB_PATH}

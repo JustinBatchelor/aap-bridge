@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: aap-bridge-db
+spec:
+  serviceName: aap-bridge-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aap-bridge-db
+  template:
+    metadata:
+      labels:
+        app: aap-bridge-db
+    spec:
+      serviceAccountName: aap-bridge-db
+      securityContext:
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+      - name: postgresql
+        image: registry.redhat.io/rhel9/postgresql-15:latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+        - name: POSTGRESQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: aap-bridge-db
+              key: POSTGRESQL_USER
+        - name: POSTGRESQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: aap-bridge-db
+              key: POSTGRESQL_PASSWORD
+        - name: POSTGRESQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: aap-bridge-db
+              key: POSTGRESQL_DATABASE
+        - name: POSTGRESQL_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: aap-bridge-db
+              key: POSTGRESQL_ADMIN_PASSWORD
+        ports:
+        - containerPort: 5432
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/pgsql/data
+        startupProbe:
+          exec: &id001
+            command:
+            - /bin/sh
+            - -ec
+            - pg_isready -h 127.0.0.1 -U "$POSTGRESQL_USER" -d "$POSTGRESQL_DATABASE"
+          timeoutSeconds: 5
+          periodSeconds: 10
+          failureThreshold: 60
+        readinessProbe:
+          exec: *id001
+          timeoutSeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          exec: *id001
+          timeoutSeconds: 5
+          periodSeconds: 10
+          failureThreshold: 6
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: aap-bridge-db
