@@ -76,9 +76,8 @@ registries; this procedure does not republish them.
 Choose a project and confirm the target cluster before applying anything:
 
 ```bash
-oc whoami --show-server
 NAMESPACE=aap-bridge
-oc create namespace "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
+oc new-project "$NAMESPACE"
 mkdir -p deploy/openshift/local/install
 cp deploy/openshift/example/kustomization.yaml deploy/openshift/local/install/
 ```
@@ -90,20 +89,66 @@ Edit the copied kustomization:
 
 - Set `namespace` to your project.
 - Change `resources: ../base` to `../../base` for this local directory.
-- Replace both application image tags with `digest: sha256:...`, retaining their
-  `newName` values and removing `newTag`.
-- Set the `oauth-proxy` replacement to the cluster's release image. Resolve it:
+- Select each application image with either `newTag` or `digest`, as shown below.
+  The example uses the published source-revision tag `810925561e26` for both
+  application images. Update it when publishing a newer revision.
+- Set the `oauth-proxy` replacement to the OAuth proxy **component image** from
+  the cluster's release. The release payload itself is not an OAuth proxy image:
 
 ```bash
 RELEASE_IMAGE=$(oc get clusterversion version -o jsonpath='{.status.desired.image}')
-oc adm release info "$RELEASE_IMAGE" --image-for=oauth-proxy
+OAUTH_PROXY_IMAGE=$(oc adm release info "$RELEASE_IMAGE" --image-for=oauth-proxy) &&
+  printf 'newName: %s\ndigest: %s\n' \
+    "${OAUTH_PROXY_IMAGE%@*}" "${OAUTH_PROXY_IMAGE##*@}"
 ```
 
-Split the resulting `repository@sha256:...` into `newName: repository` and
-`digest: sha256:...`. Also pin PostgreSQL by adding an image replacement whose
+Copy the printed `newName` and `digest` lines under `- name: oauth-proxy`,
+indenting them to match the other image fields. Remove any existing `newTag`
+from that entry; never put `sha256:...` in `newTag`.
+Also pin PostgreSQL by adding an image replacement whose
 `name` is `registry.redhat.io/rhel9/postgresql-15` and whose `digest` is the
 verified vendor digest. A registry-authenticated Podman pull followed by
 `podman image inspect --format '{{.RepoDigests}}' IMAGE` provides that digest.
+
+### Choose a version tag or a digest
+
+Kustomize already supports both forms; no application code changes are needed.
+Choose one selector per image entry. Quote tag values so YAML does not interpret
+numeric-looking revision tags as numbers:
+
+```yaml
+# Version/tag: renders quay.io/jbatchel/aap-bridge-api:810925561e26
+images:
+  - name: aap-bridge-api
+    newName: quay.io/jbatchel/aap-bridge-api
+    newTag: "810925561e26"
+```
+
+Or replace `newTag` with the corresponding image digest:
+
+```yaml
+# Digest: renders quay.io/jbatchel/aap-bridge-api@sha256:...
+images:
+  - name: aap-bridge-api
+    newName: quay.io/jbatchel/aap-bridge-api
+    digest: sha256:dd297caaef1acfdfbff25afe359980213407b6e1444d596d4b0911f2186623cd
+```
+
+Apply the same choice independently to the UI using its own tag or digest.
+`latest` is a literal tag, not a request to find the newest published version.
+The application repositories publish source-revision tags; they currently have
+no `latest` tag. `digest: latest` is invalid, and `newTag: sha256:...` produces
+an invalid image reference. Prefer digests when an installation must remain pinned
+to exact image contents. See the [Kustomize image reference](https://github.com/kubernetes-sigs/kustomize/blob/master/site/content/en/docs/Reference/API/Kustomization%20File/images.md).
+
+The `name` field must match the image in the base manifests: `aap-bridge-api`,
+`aap-bridge-ui`, `oauth-proxy`, or `registry.redhat.io/rhel9/postgresql-15`.
+For example, `name: postgresql-15` does not match this package's PostgreSQL image.
+
+After editing the overlay, regenerate `local/rendered.yaml` before applying it;
+the previously rendered file does not update automatically. No image rebuild is
+needed when selecting an already-published tag or digest. Applying the new
+Deployment image references creates a replacement pod automatically.
 
 Optionally add strategic merge patches under `patches` for:
 
@@ -140,18 +185,22 @@ credentials, percent-encode the username/password in the URL.
 Retain the encryption key securely with database backups. Replacing it makes
 existing encrypted AAP tokens unreadable. This is not a key-rotation tool.
 
-If vendor images need a pull secret, create a **minimal Docker config containing
-only the vendor pull credentials** in the ignored local directory, then:
+If vendor images need a pull secret, use Podman's default Linux authentication
+file after running `podman login registry.redhat.io`:
 
 ```bash
 oc create -n "$NAMESPACE" secret generic vendor-pull \
   --type=kubernetes.io/dockerconfigjson \
-  --from-file=.dockerconfigjson=deploy/openshift/local/vendor-pull.json
+  --from-file=.dockerconfigjson="${XDG_RUNTIME_DIR}/containers/auth.json"
 ```
 
+This copies every registry entry in that file, including Quay credentials if
+stored there. To include only vendor pull credentials, use a separate auth file
+instead. If you logged in with `--authfile` or `REGISTRY_AUTH_FILE`, substitute
+that path in the command.
+
 Declare `imagePullSecrets: [{name: vendor-pull}]` in overlay patches for both
-ServiceAccounts (`aap-bridge` and `aap-bridge-db`). Do not copy Quay push
-credentials into the cluster. Public application images need no pull credentials.
+ServiceAccounts (`aap-bridge` and `aap-bridge-db`). Public application images need no pull credentials.
 Clusters with suitable global vendor pull credentials need no additional secret.
 
 ## 3. Validate, deploy and grant access
@@ -175,7 +224,16 @@ volume. The application creates its database tables on startup.
 
 To grant application access, copy `example/access.example.yaml` into the local
 directory, replace its group name with an existing authorized OpenShift group,
-and apply it with `-n "$NAMESPACE"`. Alternatively grant a specific existing user:
+and apply it with `-n "$NAMESPACE"`. 
+
+```bash
+cp deploy/openshift/example/access.example.yaml deploy/openshift/local/install/access-groups.yaml
+## update deploy/openshift/local/install/access-groups.yaml
+oc apply -f deploy/openshift/local/install/access-groups.yaml
+```
+
+
+Alternatively grant a specific existing user:
 
 ```bash
 oc create rolebinding aap-bridge-user -n "$NAMESPACE" \
