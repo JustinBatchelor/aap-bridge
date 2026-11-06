@@ -45,13 +45,10 @@ inputs. `.dockerignore` also excludes `.env` variants, local overlays, credentia
 backups, and validation records. Do not add credentials under `src`, `config`, or
 `web`, which are copied into builds.
 
-Create public repositories `jbatchel/aap-bridge-api` and `jbatchel/aap-bridge-ui`
-in Quay (substitute your own namespace when reusing this package). Authenticate
-interactively, review the source, and build from a committed revision:
+Authenticate to `registry.redhat.io` for postgresql container image pull later on
 
 ```bash
 podman login registry.redhat.io
-podman login quay.io
 ```
 
 (optional) If you need to build the images 
