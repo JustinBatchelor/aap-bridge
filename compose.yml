@@ -84,7 +84,7 @@ services:
     env_file:
       - .env
     environment:
-      MIGRATION_STATE_DB_PATH: "postgresql://${POSTGRESQL_USER:?Set POSTGRESQL_USER in .env}:${POSTGRESQL_PASSWORD:?Set POSTGRESQL_PASSWORD in .env}@db:5432/${POSTGRESQL_DATABASE:-aap_migration}"
+      MIGRATION_STATE_DB_PATH: "postgresql+psycopg2://${POSTGRESQL_USER:?Set POSTGRESQL_USER in .env}:${POSTGRESQL_PASSWORD:?Set POSTGRESQL_PASSWORD in .env}@db:5432/${POSTGRESQL_DATABASE:-aap_migration}"
       AAP_BRIDGE_CONFIG: /app/config/config.yaml
       AAP_BRIDGE_LOG_LEVEL: ${AAP_BRIDGE_LOG_LEVEL:-INFO}
     extra_hosts:
@@ -118,7 +118,7 @@ services:
     network_mode: host
     userns_mode: "keep-id:uid=998,gid=998"
     environment:
-      MIGRATION_STATE_DB_PATH: "postgresql://${POSTGRESQL_USER:-aap_migration_user}:${POSTGRESQL_PASSWORD:-redhat123!}@localhost:15432/${POSTGRESQL_DATABASE:-aap_migration}"
+      MIGRATION_STATE_DB_PATH: "postgresql+psycopg2://${POSTGRESQL_USER:?Set POSTGRESQL_USER in .env}:${POSTGRESQL_PASSWORD:?Set POSTGRESQL_PASSWORD in .env}@localhost:15432/${POSTGRESQL_DATABASE:-aap_migration}"
       AAP_BRIDGE_CONFIG: /app/config/config.yaml
       AAP_BRIDGE_LOG_LEVEL: ${AAP_BRIDGE_LOG_LEVEL:-INFO}
     security_opt:
