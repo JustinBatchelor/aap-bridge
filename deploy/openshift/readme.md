@@ -1,9 +1,10 @@
 # Deploy AAP Bridge on OpenShift
 
-This package runs the Web UI and API behind OpenShift OAuth, with bundled
-PostgreSQL 15 and persistent migration artifacts. It is a fresh installation:
-local `.env` files and connections are not imported. The existing local
-Containerfiles and Compose workflow remain independent.
+The supported OpenShift deployment workflow uses **BuildConfigs and ImageStreams**.
+OpenShift builds the API and UI from one published Git commit, stores their images
+in the integrated registry, and deploys explicitly selected immutable digests.
+Image publication from a workstation is not part of this workflow. The local
+Compose workflow remains independent.
 
 ## Architecture and requirements
 
@@ -23,83 +24,157 @@ the workload directly using `oc exec` or port forwarding.
 Requirements:
 
 - OpenShift 4.x with integrated OAuth, ingress, and service-serving certificates.
-- `oc`, Podman, Python 3 with PyYAML, registry credentials, and permission to create a project,
-  namespaced workloads, Secrets, Roles, NetworkPolicies and PVCs.
+- `oc`, Python 3 with PyYAML, registry credentials, and permission to create a project,
+  BuildConfigs, ImageStreams, workloads, Secrets, Roles, NetworkPolicies and PVCs.
+  Podman is optional for creating a dedicated vendor authentication file.
 - An amd64 worker (the documented builds target linux/amd64).
 - A dynamic storage class that permits writes by the SCC-assigned UID/fsGroup.
   Storage defaults to the cluster default class, with RWO claims: 10 GiB database
   and 20 GiB artifacts. NFS must support these permissions; do not solve storage
   permission errors by granting `anyuid` or adding a root init container.
-- Image pulls from Quay and Red Hat registries. API outbound access to the cluster
-  OAuth/API endpoints and, when later configured, the chosen AAP servers.
+- An available integrated image registry and outbound build access to GitHub,
+  Red Hat registries, OS package repositories, PyPI, and npm. API outbound access
+  to cluster OAuth/API endpoints and, when configured, the chosen AAP servers.
 
 This is a single-instance installation, not HA. Keep one API process and one
 replica. Updates use `Recreate`, causing downtime. In-flight migrations are not
 resumed automatically; the API marks unfinished jobs failed after restarting.
 Stop or finish jobs before upgrades. PostgreSQL also has one replica.
 
-## 1. Build and publish application images
+ImageStreams track image metadata, not image-layer storage. No DeploymentConfig,
+Tekton installation, webhook, or automatic image-change rollout is required.
+Both BuildConfigs have empty triggers and use the Docker build strategy (not a
+Docker daemon on the worker). Build admission uses the cluster's standard build
+service account policy; application pods retain their restricted security policy.
+Do not grant application service accounts privileged SCC access to fix a build.
 
-Alternatively, [build images inside OpenShift using BuildConfigs and ImageStreams](builds/readme.md).
-That optional workflow uses a pinned Git commit, the integrated registry, and
-manual digest promotion. The application architecture and Quay workflow below
-remain unchanged.
+## 1. Prepare a build and application namespace
 
-Run from the repository root. The separate Containerfiles use explicit COPY
-inputs. `.dockerignore` also excludes `.env` variants, local overlays, credentials,
-backups, and validation records. Do not add credentials under `src`, `config`, or
-`web`, which are copied into builds.
-
-Authenticate to `registry.redhat.io` for postgresql container image pull later on
-
-```bash
-podman login registry.redhat.io
-```
-
-(optional) If you need to build the images 
-```bash
-REVISION=$(git rev-parse --short=12 HEAD)
-API_IMAGE=quay.io/jbatchel/aap-bridge-api
-UI_IMAGE=quay.io/jbatchel/aap-bridge-ui
-podman build --platform linux/amd64 -f deploy/openshift/Containerfile.api \
-  -t "$API_IMAGE:$REVISION" .
-podman build --platform linux/amd64 -f deploy/openshift/Containerfile.ui \
-  -t "$UI_IMAGE:$REVISION" .
-podman push --digestfile /tmp/aap-api.digest "$API_IMAGE:$REVISION"
-podman push --digestfile /tmp/aap-ui.digest "$UI_IMAGE:$REVISION"
-cat /tmp/aap-api.digest /tmp/aap-ui.digest
-```
-
-Record the digests; do not reuse revision tags for different image contents.
-Dependencies are resolved at build time, so the digest identifies the tested
-artifact even if rebuilding the same source later resolves newer dependencies.
-Check Quay repository visibility and test an anonymous pull using an empty
-Podman auth file. PostgreSQL and OAuth proxy images stay in their vendor
-registries; this procedure does not republish them.
-
-## 2. Prepare namespace, overlay and Secrets
-
-Choose a project and confirm the target cluster before applying anything:
+Run from the repository root. You need `oc`, Python 3 with PyYAML, namespace/build
+permissions, an available integrated registry, amd64 workers, and outbound access to GitHub,
+registry.redhat.io, package repositories, PyPI, and npm. No local Podman build is
+required. Registry storage and cluster capacity must accommodate both images.
 
 ```bash
-NAMESPACE=aap-bridge
+NAMESPACE=aap-bridge-build-test
+REVISION=$(git rev-parse main)
+# Ensure REVISION is published in the Git repository configured below.
 oc new-project "$NAMESPACE"
-mkdir -p deploy/openshift/local/install
-cp deploy/openshift/example/kustomization.yaml deploy/openshift/local/install/
+mkdir -p deploy/openshift/local/build-test
 ```
 
-`namespace.yaml` is also provided for the default `aap-bridge` name. Namespace
-creation is intentionally separate from workload application and deletion.
+If the namespace already exists, inspect its ownership before applying anything.
+`oc new-project` selects the new project in your CLI context. Use `oc create namespace`
+instead if you need to preserve that context and have permission. All subsequent
+commands use explicit `-n` arguments. Use a separate namespace for validation so
+builds and fresh test data cannot affect the working
+Bridge. For a new installation, choose its namespace here; the examples use
+`aap-bridge-build-test` and an ignored `local/build-test` workspace throughout.
+Do not copy application Secrets or database contents between instances.
 
-Edit the copied kustomization:
+The manifests default to the public JustinBatchelor/aap-bridge fork and a pinned
+published commit. Customize `spec.source.git.uri` and `ref` with an overlay for
+another fork. The helper's `--commit` explicitly selects the revision of each run.
+Private repositories additionally require a Git source Secret; it is separate
+from the registry pull Secret. Never put credentials in a Git URL or build args.
 
-- Set `namespace` to your project.
-- Change `resources: ../base` to `../../base` for this local directory.
-- Select each application image with either `newTag` or `digest`, as shown below.
-  The example uses the published source-revision tag `810925561e26` for both
-  application images. Update it when publishing a newer revision.
-- Set the `oauth-proxy` replacement to the OAuth proxy **component image** from
-  the cluster's release. The release payload itself is not an OAuth proxy image:
+If the cluster cannot already pull Red Hat base images, create a **Red Hat-only**
+Docker auth Secret named `vendor-pull` in this namespace. For example, authenticate
+using a dedicated local auth file, then import it:
+
+```bash
+podman login --authfile deploy/openshift/local/build-test/vendor-auth.json registry.redhat.io
+chmod 600 deploy/openshift/local/build-test/vendor-auth.json
+oc create secret generic vendor-pull -n "$NAMESPACE" \
+  --type=kubernetes.io/dockerconfigjson \
+  --from-file=.dockerconfigjson=deploy/openshift/local/build-test/vendor-auth.json
+oc secrets link builder vendor-pull --for=pull -n "$NAMESPACE"
+```
+
+The registry auth file stays JSON because Podman and Kubernetes require Docker
+authentication JSON; it is not a generated deployment manifest.
+
+The namespace's normal builder account pushes to its own integrated registry
+repository. Do not supply external push credentials, application tokens, or the
+database encryption key to build pods. A separate registry Route is unnecessary.
+
+```bash
+oc kustomize deploy/openshift/builds > deploy/openshift/local/build-test/builds.yaml
+oc apply -n "$NAMESPACE" --dry-run=server -f deploy/openshift/local/build-test/builds.yaml
+oc apply -n "$NAMESPACE" -f deploy/openshift/local/build-test/builds.yaml
+```
+
+## 2. Build and record immutable outputs
+
+```bash
+python3 deploy/openshift/build-images.py \
+  --namespace "$NAMESPACE" --commit "$REVISION" \
+  --output deploy/openshift/local/build-test/images.yaml
+```
+
+The helper starts API then UI, verifies the source revision of each successful
+Build, saves a YAML build record, and prints an `images:` Kustomize fragment. Both
+Python generators require a `.yaml` or `.yml` output filename. The build record
+is metadata, not a Kubernetes manifest: copy its image entries as shown below
+rather than applying the record directly. It reads each Build's output
+digest, not the current candidate tag, so a later build cannot silently change
+the recorded result. It refuses to overwrite an existing record; use a new
+filename for another run. On failure, investigate before rerunning (a rerun
+builds both images). The helper never modifies a Deployment.
+
+Each BuildConfig uses `Serial`, requests 250m CPU/512 MiB memory, limits 2 CPU/4 GiB,
+and has a 30-minute completion deadline. Three successful and three failed Build
+records are retained. Build history retention is not registry image pruning;
+retain rollback digests and use existing cluster image-pruning procedures.
+
+```bash
+oc get builds -n "$NAMESPACE"
+oc logs -f build/aap-bridge-api-1 -n "$NAMESPACE"
+oc describe build/aap-bridge-api-1 -n "$NAMESPACE"
+oc get imagestreams -n "$NAMESPACE"
+```
+
+Use the actual Build name printed by the helper. Git pinning identifies source,
+but base images and Python dependencies can change between builds. Record and
+deploy the tested output digest; do not assume a rebuild is identical. Git builds
+do not include uncommitted local source changes.
+
+## 3. Deploy and validate a fresh Bridge instance
+
+Successful builds create images, not a running application. This section creates
+the Bridge Deployment, PostgreSQL StatefulSet, PVCs, Services, Route, application
+service accounts, and access Role. Keep these resources separate from the build
+package so application teardown does not remove build outputs.
+
+### 3.1. Create the application overlay
+
+Continue from the repository root with the same `NAMESPACE` used for your builds.
+Create a local overlay without overwriting an existing customization:
+
+```bash
+mkdir -p deploy/openshift/local/build-test/install
+cp -n deploy/openshift/example/kustomization.yaml \
+  deploy/openshift/local/build-test/install/kustomization.yaml
+```
+
+Print the API/UI entries from the successful build record. If you chose another
+output filename in section 2, use that filename here:
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+import yaml
+
+record = yaml.safe_load(Path('deploy/openshift/local/build-test/images.yaml').read_text())
+print('images:')
+for image in record['images']:
+    print(f"  - name: {image['name']}")
+    print(f"    newName: {image['newName']}")
+    print(f"    digest: {image['digest']}")
+PY
+```
+
+Resolve the OAuth proxy **component image** from this cluster's release:
 
 ```bash
 RELEASE_IMAGE=$(oc get clusterversion version -o jsonpath='{.status.desired.image}')
@@ -108,142 +183,224 @@ OAUTH_PROXY_IMAGE=$(oc adm release info "$RELEASE_IMAGE" --image-for=oauth-proxy
     "${OAUTH_PROXY_IMAGE%@*}" "${OAUTH_PROXY_IMAGE##*@}"
 ```
 
-Copy the printed `newName` and `digest` lines under `- name: oauth-proxy`,
-indenting them to match the other image fields. Remove any existing `newTag`
-from that entry; never put `sha256:...` in `newTag`.
-Also pin PostgreSQL by adding an image replacement whose
-`name` is `registry.redhat.io/rhel9/postgresql-15` and whose `digest` is the
-verified vendor digest. A registry-authenticated Podman pull followed by
-`podman image inspect --format '{{.RepoDigests}}' IMAGE` provides that digest.
-
-### Choose a version tag or a digest
-
-Leave in place unless you are targeting a new containerimage hosted in a different repo+tag
+Edit `deploy/openshift/local/build-test/install/kustomization.yaml` using the
+complete structure below. Replace every `REPLACE_...` value. Set `namespace` to
+your actual build namespace, copy the API/UI repository and digest values from
+the build record, and copy the OAuth values from the command above. Do not use
+the release payload image itself as the OAuth proxy image.
 
 ```yaml
-# Version/tag: renders quay.io/jbatchel/aap-bridge-api:810925561e26
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: aap-bridge-build-test
+resources:
+  - ../../../base
 images:
   - name: aap-bridge-api
-    newName: quay.io/jbatchel/aap-bridge-api
-    newTag: "810925561e26"
-```
-
-The `name` field must match the image in the base manifests: `aap-bridge-api`,
-`aap-bridge-ui`, `oauth-proxy`, or `registry.redhat.io/rhel9/postgresql-15`.
-For example, `name: postgresql-15` does not match this package's PostgreSQL image.
-
-After editing the overlay, regenerate `local/rendered.yaml` before applying it;
-the previously rendered file does not update automatically. No image rebuild is
-needed when selecting an already-published tag or digest. Applying the new
-Deployment image references creates a replacement pod automatically.
-
-Optionally add strategic merge patches under `patches` for:
-
-- Route `aap-bridge`: `spec.host` (otherwise OpenShift generates it).
-- PVCs `aap-bridge-db` and `aap-bridge-data`: `spec.storageClassName` and capacity.
-- Deployment or StatefulSet resource requests/limits for your migration size.
-
-For example, a PVC override in the kustomization is:
-
-```yaml
+    newName: REPLACE_WITH_API_REPOSITORY
+    digest: REPLACE_WITH_API_SHA256_DIGEST
+  - name: aap-bridge-ui
+    newName: REPLACE_WITH_UI_REPOSITORY
+    digest: REPLACE_WITH_UI_SHA256_DIGEST
+  - name: oauth-proxy
+    newName: REPLACE_WITH_OAUTH_PROXY_REPOSITORY
+    digest: REPLACE_WITH_OAUTH_PROXY_SHA256_DIGEST
 patches:
   - target:
       kind: PersistentVolumeClaim
     patch: |-
       - op: add
         path: /spec/storageClassName
-        value: YOUR_STORAGE_CLASS
+        value: REPLACE_WITH_STORAGE_CLASS
+  - target:
+      kind: Route
+      name: aap-bridge
+    patch: |-
+      - op: add
+        path: /spec/host
+        value: REPLACE_WITH_ROUTE_HOST
+  - target:
+      kind: ServiceAccount
+      name: aap-bridge
+    patch: |-
+      - op: add
+        path: /imagePullSecrets
+        value:
+          - name: vendor-pull
+  - target:
+      kind: ServiceAccount
+      name: aap-bridge-db
+    patch: |-
+      - op: add
+        path: /imagePullSecrets
+        value:
+          - name: vendor-pull
 ```
 
-Generate Secrets once for a new installation. The script creates a mode-0600
-multi-document YAML file, refuses to overwrite it, and does not print secret values.
-Use the project virtual environment if your system Python does not provide PyYAML:
+The `../../../base` path is relative to this specific `install` directory. Remove
+any copied `newTag` fields when using `digest`; each digest includes its `sha256:`
+prefix. PostgreSQL remains vendor-sourced through the base manifests.
+
+Choose an existing storage class with `oc get storageclass`. This patch applies
+to both fresh PVCs (10 GiB PostgreSQL and 20 GiB artifacts). Choose an unused Route
+hostname under your cluster's ingress domain, which you can inspect with:
 
 ```bash
-python3 deploy/openshift/generate-secrets.py --namespace "$NAMESPACE"
-oc create -n "$NAMESPACE" -f deploy/openshift/local/secrets.yaml
+oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}{"\n"}'
 ```
 
-`secrets.example.yaml` describes required keys and is deliberately excluded from
-Kustomize. Never apply its placeholders. The generated database URL explicitly selects `postgresql+psycopg2://`, matching
-the installed driver, and uses a hexadecimal password to avoid URL escaping problems. For manually supplied
-credentials, percent-encode the username/password in the URL.
+For example, use `aap-bridge-build-test.<ingress-domain>`. If the cluster already
+provides vendor pull credentials and you did not create `vendor-pull`, omit the
+two ServiceAccount patches. Same-namespace service accounts normally have
+integrated-registry pull access; external application-registry credentials are unnecessary.
 
-Retain the encryption key securely with database backups. Replacing it makes
-existing encrypted AAP tokens unreadable. This is not a key-rotation tool.
+### 3.2. Create application Secrets once
 
-If vendor images need a pull secret, use Podman's default Linux authentication
-file after running `podman login registry.redhat.io`:
+Check whether you already completed this step:
 
 ```bash
-oc create -n "$NAMESPACE" secret generic vendor-pull \
-  --type=kubernetes.io/dockerconfigjson \
-  --from-file=.dockerconfigjson="${XDG_RUNTIME_DIR}/containers/auth.json"
+oc get secret aap-bridge aap-bridge-db aap-bridge-oauth -n "$NAMESPACE"
 ```
 
-This copies every registry entry in that file, including Quay credentials if
-stored there. To include only vendor pull credentials, use a separate auth file
-instead. If you logged in with `--authfile` or `REGISTRY_AUTH_FILE`, substitute
-that path in the command.
-
-Declare `imagePullSecrets: [{name: vendor-pull}]` in overlay patches for both
-ServiceAccounts (`aap-bridge` and `aap-bridge-db`). Public application images need no pull credentials.
-Clusters with suitable global vendor pull credentials need no additional secret.
-
-## 3. Validate, deploy and grant access
+If all three exist for this installation, keep them and proceed to section 3.3.
+For a fresh installation with none of these Secrets, generate and create them:
 
 ```bash
-oc kustomize deploy/openshift/local/install > deploy/openshift/local/rendered.yaml
-oc apply -n "$NAMESPACE" --dry-run=server -f deploy/openshift/local/rendered.yaml
-oc apply -n "$NAMESPACE" -f deploy/openshift/local/rendered.yaml
+python3 deploy/openshift/generate-secrets.py --namespace "$NAMESPACE" \
+  --output deploy/openshift/local/build-test/secrets.yaml
+oc create -n "$NAMESPACE" -f deploy/openshift/local/build-test/secrets.yaml
+```
+
+The generator requires Python 3 with PyYAML and refuses to overwrite an existing
+file. Use a new output filename if one remains from a previous installation, and
+use the same filename in `oc create`. If only some Secrets exist, resolve the
+partial installation using its original generated file rather than regenerating
+credentials for an existing database. Never replace an existing encryption key
+just to redeploy images.
+
+### 3.3. Render, validate, and deploy
+
+```bash
+oc kustomize deploy/openshift/local/build-test/install \
+  > deploy/openshift/local/build-test/rendered.yaml
+```
+
+Inspect `rendered.yaml` before applying. Confirm the namespace, Route host, storage
+class, and image references, with no placeholder values remaining. The API digest must
+appear in `initialize-data`, `wait-for-database`, and `api`; the UI digest in `ui`.
+There must be no `image.openshift.io/triggers` annotation or automatic deployment
+trigger. A new candidate build alone must not change running pods.
+
+```bash
+oc apply -n "$NAMESPACE" --dry-run=server \
+  -f deploy/openshift/local/build-test/rendered.yaml
+
+# Continue only after validation succeeds.
+oc apply -n "$NAMESPACE" \
+  -f deploy/openshift/local/build-test/rendered.yaml
+
 oc rollout status -n "$NAMESPACE" statefulset/aap-bridge-db --timeout=300s
 oc rollout status -n "$NAMESPACE" deployment/aap-bridge --timeout=300s
-oc get -n "$NAMESPACE" pods,pvc,route
+oc get pods,pvc,route -n "$NAMESPACE"
+oc get route aap-bridge -n "$NAMESPACE" \
+  -o jsonpath='https://{.spec.host}{"\n"}'
 ```
 
-The service certificate controller creates `aap-bridge-tls`. The Route uses the
-cluster ingress certificate externally and verifies the service certificate
-internally. No certificate or private key belongs in Git.
-
-The API init container waits for an authenticated database query before startup.
-Another non-root init container creates artifact directories on the mounted
-volume. The application creates its database tables on startup.
-
-To grant application access, copy `example/access.example.yaml` into the local
-directory, replace its group name with an existing authorized OpenShift group,
-and apply it with `-n "$NAMESPACE"`. 
+Expect PostgreSQL to be 1/1 ready, Bridge to be 3/3 ready, and both PVCs to be Bound.
+The service certificate controller creates `aap-bridge-tls`; do not generate that
+Secret manually. If rollout fails, inspect events and the relevant container:
 
 ```bash
-cp deploy/openshift/example/access.example.yaml deploy/openshift/local/install/access-groups.yaml
-## update deploy/openshift/local/install/access-groups.yaml
-oc apply -f deploy/openshift/local/install/access-groups.yaml
+oc get events -n "$NAMESPACE" --sort-by=.metadata.creationTimestamp
+oc logs -n "$NAMESPACE" deployment/aap-bridge -c wait-for-database
+oc logs -n "$NAMESPACE" deployment/aap-bridge -c api
+oc logs -n "$NAMESPACE" statefulset/aap-bridge-db -c postgresql
 ```
 
+### 3.4. Verify readiness and browser access
 
-Alternatively grant a specific existing user:
-
-```bash
-oc create rolebinding aap-bridge-user -n "$NAMESPACE" \
-  --role=aap-bridge-access --user=YOUR_OPENSHIFT_USER
-```
-
-Do not grant access to `system:authenticated`. Existing namespace readers may
-already satisfy the Service-read check; review namespace RBAC accordingly.
-The proxy performs a user SubjectAccessReview and needs no cluster-wide
-`auth-delegator` binding for this browser login flow.
+Check the version list through nginx without contacting any AAP endpoint:
 
 ```bash
+oc exec -n "$NAMESPACE" deployment/aap-bridge -c ui -- \
+  curl --fail --silent http://127.0.0.1:8080/api/versions
+
 ROUTE_HOST=$(oc get route aap-bridge -n "$NAMESPACE" -o jsonpath='{.spec.host}')
 curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' \
   "https://$ROUTE_HOST/"
 ```
 
-Expect a redirect to OpenShift OAuth. Do not use `-k` to conceal certificate
-problems. Logging in and configuring connections are separate application tasks.
-Connections are managed through the UI; `SOURCE__*` and `TARGET__*` environment
-variables do not populate saved Web UI connections.
+Expect a populated version list and HTTP 302 to cluster OAuth; the curl command
+does not follow the redirect. Open the printed HTTPS URL for manual login. Users
+need permission to get the `aap-bridge` Service in this namespace. Namespace
+administrators already have that permission. To grant another existing user
+application access, replace the username below:
 
-## 4. Infrastructure checks and troubleshooting
+```bash
+oc create rolebinding aap-bridge-user -n "$NAMESPACE" \
+  --role=aap-bridge-access --user=REPLACE_WITH_OPENSHIFT_USERNAME
+```
+
+Validate server-side admission, build completion, image pulls, assigned UIDs,
+PVC binding/writes, database readiness, probes, internal API/nginx responses,
+and external Route TLS/OAuth redirect. Check `/api/versions` for populated choices.
+Test migration-state initialization against only the fresh database with
+`postgresql+psycopg2://`, and confirm credential redaction. Audit source inputs and
+final application files for private artifacts. Do not run AAP migrations or contact
+source/target endpoints as part of infrastructure validation.
+
+Keep a local dated record of the Git commit, Build names, output digests, workload
+status, Route URL, and checks. Browser login, connection configuration, authenticated
+WebSockets, migration execution, and backup/restore remain manual follow-up tests.
+
+## 4. Updates, manual promotion, and rollback
+
+To build an update, select a new published commit and rerun section 2 with a new
+output filename. Use the resulting digests in the application overlay and rerender
+it before applying; no workstation image push is needed.
+
+Complete active migrations before changing the working application; its `Recreate`
+strategy causes downtime and restarts interrupt jobs. First record the current
+application image references and retain the existing Secrets, database, and PVCs.
+
+When pulling from a separate build namespace, grant only the consuming application's
+service account image-pull rights in the build namespace (substitute both names):
+
+```bash
+oc policy add-role-to-user system:image-puller \
+  system:serviceaccount:APPLICATION_NAMESPACE:aap-bridge -n BUILD_NAMESPACE
+```
+
+Update both application digest entries in the destination overlay, render, review,
+and apply that overlay. This updates both API init containers and the API/UI containers
+together. Do not patch only the main API container. Verify rollout, readiness, and
+the version endpoint. Building/promoting an ImageStreamTag is not a deployment.
+
+To roll back an image-only release, restore the recorded previous API/UI references
+in the overlay and reapply. This does not restore changed database data; changes
+with schema/data migrations require their own backup and compatibility plan.
+No source dependency or application schema change is part of this workflow.
+
+## 5. Application operation and troubleshooting
+
+Connections are managed in the UI. `SOURCE__*` and `TARGET__*` environment variables
+do not populate saved Web UI connections. All authorized users share the workspace.
+For group access, customize `example/access.example.yaml` locally and apply it with
+an explicit namespace. Do not grant application access to `system:authenticated`.
+The browser OAuth flow needs no cluster-wide `auth-delegator` binding.
+
+Build troubleshooting:
+
+- Git clone failures: verify the repository, published commit, DNS/egress, and
+  source Secret for private repositories.
+- Base-image pull failures: verify the builder account's vendor pull credentials;
+  the UI build pulls base images for both stages.
+- Internal registry push failures: inspect registry health and builder permissions.
+- Pending/failed builds: inspect Build/pod events for quota, admission, scheduling,
+  OOM, or deadline failures. Adjust build resources without relaxing application SCCs.
+- New images not running: builds do not trigger rollouts; update the overlay's
+  digests and apply it as described in sections 3 and 4.
+
 
 ```bash
 oc get pods -n "$NAMESPACE" -o wide
@@ -262,8 +419,8 @@ cluster's restricted SCC and assigned IDs, not an `anyuid` exception. The image
 USER is only a non-root fallback. PVC permissions rely on SCC-assigned fsGroup;
 no cluster-specific IDs are hardcoded.
 
-- `ImagePullBackOff`: verify image digest, public Quay access, vendor credentials,
-  registry reachability and architecture.
+- `ImagePullBackOff`: verify the recorded build digest, integrated-registry pull
+  permissions, vendor credentials, registry reachability, and architecture.
 - Pending PVC: verify default/selected StorageClass and provisioner events.
 - Permission denied: inspect mount ownership and CSI fsGroup behavior. Fix storage
   provisioning rather than weakening the SCC.
@@ -287,12 +444,11 @@ set both `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` to that file through an overla
 Keep connection TLS verification enabled. This is independent of Route TLS and
 the OAuth proxy's cluster CA trust.
 
-## 5. Updates, persistence and backups
+## 6. Persistence and backups
 
-Finish migration jobs before updates. Rebuild/push changed images with a new
-revision tag, update digests, validate, apply, and wait for rollout. ConfigMap
-content changes get a new generated name and trigger a rollout. For Secret-only
-changes, deliberately restart the application after updating Secrets:
+Use section 4 for image updates. ConfigMap content changes get a new generated
+name and trigger a rollout. For Secret-only changes, deliberately restart the
+application after updating Secrets:
 
 ```bash
 oc rollout restart -n "$NAMESPACE" deployment/aap-bridge
@@ -337,7 +493,7 @@ Ensure restored database credentials and the connection URL match the new
 namespace's database. Confirm permissions and token decryption before production
 use. Backup/restore execution is not part of the infrastructure-only smoke test.
 
-## 6. Teardown
+## 7. Teardown
 
 To stop the installation while preserving its data:
 
@@ -347,8 +503,10 @@ oc scale -n "$NAMESPACE" statefulset/aap-bridge-db --replicas=0
 ```
 
 To remove running workload definitions, delete the Deployment, StatefulSet,
-Services and Route explicitly. Keep PVCs and Secrets for reuse. Do not use
-`oc delete -k`, delete the namespace, or delete PVCs as routine teardown: those
+Services and Route explicitly. Keep PVCs and Secrets for reuse. BuildConfigs and
+ImageStreams can remain for future builds; remove those explicitly only when
+retiring the build workflow. Build history retention does not prune registry storage.
+Do not use `oc delete -k`, delete the namespace, or delete PVCs as routine teardown: those
 operations remove data claims. Final data destruction requires a separate,
 intentional action and consideration of the storage class's reclaim policy.
 
@@ -360,5 +518,7 @@ redirects. It does not log into the UI, create connections, contact AAP instance
 or run migrations. Browser login, authenticated WebSockets, connection tests,
 and actual backup/restore remain separate follow-up checks.
 
-References: [OpenShift OAuth proxy](https://github.com/openshift/oauth-proxy),
+References: [Docker build strategy](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/builds_using_buildconfig/build-strategies),
+[ImageStream deployment triggers](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/images/triggering-updates-on-imagestream-changes),
+[OpenShift OAuth proxy](https://github.com/openshift/oauth-proxy),
 [OpenShift image guidelines](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/images/creating-images).

@@ -16,6 +16,8 @@ parser.add_argument(
     "--output", type=Path, default=Path(__file__).parent / "local/secrets.yaml"
 )
 args = parser.parse_args()
+if args.output.suffix.lower() not in (".yaml", ".yml"):
+    parser.error("--output must have a .yaml or .yml extension")
 if not re.fullmatch(r"[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?", args.namespace):
     parser.error("namespace must be a DNS label of at most 63 characters")
 password = secrets.token_hex(32)

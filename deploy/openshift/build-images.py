@@ -11,6 +11,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import yaml
+
 
 def oc(namespace, *args):
     return subprocess.check_output(["oc", "-n", namespace, *args], text=True).strip()
@@ -20,10 +22,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--namespace", required=True)
     parser.add_argument("--commit", required=True, help="Published full Git commit SHA")
-    parser.add_argument("--output", type=Path, required=True, help="New local JSON record")
+    parser.add_argument(
+        "--output", type=Path, required=True, help="New local YAML record (.yaml or .yml)"
+    )
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.commit):
         parser.error("--commit must be a full lowercase Git commit SHA")
+    if args.output.suffix.lower() not in (".yaml", ".yml"):
+        parser.error("--output must have a .yaml or .yml extension")
     if args.output.exists():
         parser.error("--output already exists; choose a new record to retain prior digests")
     records = []
@@ -65,8 +71,7 @@ def main():
         )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("x") as stream:
-        json.dump({"namespace": args.namespace, "images": records}, stream, indent=2)
-        stream.write("\n")
+        yaml.safe_dump({"namespace": args.namespace, "images": records}, stream, sort_keys=False)
     print("images:")
     for record in records:
         print(
