@@ -56,7 +56,7 @@ SHA already published in the BuildConfigs' Git repository. The example uses loca
 `main`; unpushed commits and local working-tree edits cannot be built this way.
 
 ```bash
-NAMESPACE=aap-bridge-build-test
+NAMESPACE=aap-bridge
 REVISION=$(git rev-parse main)
 # Ensure REVISION is published in the Git repository configured below.
 oc new-project "$NAMESPACE"
