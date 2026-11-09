@@ -35,6 +35,7 @@ use the guides below as the source of truth.
 | Phases, resource order, resume | [Migration Workflow](docs/user-guide/migration-workflow.md) |
 | Commands | [CLI Reference](docs/user-guide/cli-reference.md) |
 | OpenShift deployment | [OpenShift guide](deploy/openshift/readme.md) |
+| OpenShift-native image builds | [BuildConfig and ImageStream guide](deploy/openshift/builds/readme.md) |
 | Browser UI | [Web UI](docs/user-guide/web-ui.md) |
 | Version paths | [Compatibility Matrix](docs/reference/compatibility-matrix.md) |
 | Ephemeral AAP testing | [Testing](docs/developer-guide/testing.md) |

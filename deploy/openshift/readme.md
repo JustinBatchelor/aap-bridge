@@ -40,6 +40,11 @@ Stop or finish jobs before upgrades. PostgreSQL also has one replica.
 
 ## 1. Build and publish application images
 
+Alternatively, [build images inside OpenShift using BuildConfigs and ImageStreams](builds/readme.md).
+That optional workflow uses a pinned Git commit, the integrated registry, and
+manual digest promotion. The application architecture and Quay workflow below
+remain unchanged.
+
 Run from the repository root. The separate Containerfiles use explicit COPY
 inputs. `.dockerignore` also excludes `.env` variants, local overlays, credentials,
 backups, and validation records. Do not add credentials under `src`, `config`, or
