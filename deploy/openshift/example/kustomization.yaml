@@ -1,25 +1,47 @@
+# Copy to local/build-test/install/kustomization.yaml before rendering.
+# Fill image entries from build-images.py output and the cluster OAuth component.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: aap-bridge
 resources:
-  - ../../base
+  - ../../../base
 images:
   - name: aap-bridge-api
-    newName: quay.io/jbatchel/aap-bridge-api
-    newTag: "7dfdbd0ced9e-dburl-bf53540d89"
+    newName: REPLACE_WITH_API_REPOSITORY
+    digest: REPLACE_WITH_API_SHA256_DIGEST
   - name: aap-bridge-ui
-    newName: quay.io/jbatchel/aap-bridge-ui
-    newTag: "810925561e26"
-  # Match the full base image name when overriding PostgreSQL.
-  # - name: registry.redhat.io/rhel9/postgresql-15
-  #   newTag: latest
+    newName: REPLACE_WITH_UI_REPOSITORY
+    digest: REPLACE_WITH_UI_SHA256_DIGEST
   - name: oauth-proxy
-    newName: REPLACE_WITH_CLUSTER_OAUTH_PROXY_IMAGE
-    digest: sha256:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-# Copy this directory to ../local/install, then change resources to ../../base.
-# newTag selects an existing registry tag; latest is not published for the app images.
-# For an immutable application image, remove newTag and use digest instead, e.g. API:
-# digest: sha256:dd297caaef1acfdfbff25afe359980213407b6e1444d596d4b0911f2186623cd
-# Set oauth-proxy newName and digest from: oc adm release info "$RELEASE_IMAGE" --image-for=oauth-proxy
-# Do not use the OpenShift release payload as the OAuth proxy image.
-# Optional patches can set Route spec.host and PVC spec.storageClassName.
+    newName: REPLACE_WITH_OAUTH_PROXY_REPOSITORY
+    digest: REPLACE_WITH_OAUTH_PROXY_SHA256_DIGEST
+patches:
+  - target:
+      kind: PersistentVolumeClaim
+    patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: REPLACE_WITH_STORAGE_CLASS
+  - target:
+      kind: Route
+      name: aap-bridge
+    patch: |-
+      - op: add
+        path: /spec/host
+        value: REPLACE_WITH_ROUTE_HOST
+  - target:
+      kind: ServiceAccount
+      name: aap-bridge
+    patch: |-
+      - op: add
+        path: /imagePullSecrets
+        value:
+          - name: vendor-pull
+  - target:
+      kind: ServiceAccount
+      name: aap-bridge-db
+    patch: |-
+      - op: add
+        path: /imagePullSecrets
+        value:
+          - name: vendor-pull

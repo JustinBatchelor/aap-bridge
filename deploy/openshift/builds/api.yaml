@@ -1,0 +1,39 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: aap-bridge-api
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: aap-bridge-api
+spec:
+  runPolicy: Serial
+  serviceAccount: builder
+  successfulBuildsHistoryLimit: 3
+  failedBuildsHistoryLimit: 3
+  completionDeadlineSeconds: 1800
+  nodeSelector:
+    kubernetes.io/arch: amd64
+  source:
+    type: Git
+    git:
+      uri: https://github.com/JustinBatchelor/aap-bridge.git
+      ref: de39ede2b2c493513a469aa7a4eccd9f5ed4e994
+    contextDir: .
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: deploy/openshift/Containerfile.api
+  output:
+    to:
+      kind: ImageStreamTag
+      name: aap-bridge-api:candidate
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: '2'
+      memory: 4Gi
+  triggers: []
