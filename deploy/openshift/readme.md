@@ -3,8 +3,9 @@
 The supported OpenShift deployment workflow uses **BuildConfigs and ImageStreams**.
 OpenShift builds the API and UI from one published Git commit, stores their images
 in the integrated registry, and deploys explicitly selected immutable digests.
-Image publication from a workstation is not part of this workflow. The local
-Compose workflow remains independent.
+Follow the steps in order: **prepare the namespace → build images → configure the
+overlay and Secrets → apply the application → verify readiness**. Successful
+builds alone do not deploy Bridge. The local Compose workflow remains independent.
 
 ## Architecture and requirements
 
@@ -50,10 +51,9 @@ Do not grant application service accounts privileged SCC access to fix a build.
 
 ## 1. Prepare a build and application namespace
 
-Run from the repository root. You need `oc`, Python 3 with PyYAML, namespace/build
-permissions, an available integrated registry, amd64 workers, and outbound access to GitHub,
-registry.redhat.io, package repositories, PyPI, and npm. No local Podman build is
-required. Registry storage and cluster capacity must accommodate both images.
+Run all commands from the repository root. Choose a namespace and a full commit
+SHA already published in the BuildConfigs' Git repository. The example uses local
+`main`; unpushed commits and local working-tree edits cannot be built this way.
 
 ```bash
 NAMESPACE=aap-bridge-build-test
@@ -141,10 +141,9 @@ do not include uncommitted local source changes.
 
 ## 3. Deploy and validate a fresh Bridge instance
 
-Successful builds create images, not a running application. This section creates
-the Bridge Deployment, PostgreSQL StatefulSet, PVCs, Services, Route, application
-service accounts, and access Role. Keep these resources separate from the build
-package so application teardown does not remove build outputs.
+This section creates the Bridge Deployment, PostgreSQL StatefulSet, PVCs, Services,
+Route, service accounts, and access Role. The application overlay is separate from
+the build package; applying only `deploy/openshift/builds` does not create these resources.
 
 ### 3.1. Create the application overlay
 
@@ -183,63 +182,25 @@ OAUTH_PROXY_IMAGE=$(oc adm release info "$RELEASE_IMAGE" --image-for=oauth-proxy
     "${OAUTH_PROXY_IMAGE%@*}" "${OAUTH_PROXY_IMAGE##*@}"
 ```
 
-Edit `deploy/openshift/local/build-test/install/kustomization.yaml` using the
-complete structure below. Replace every `REPLACE_...` value. Set `namespace` to
-your actual build namespace, copy the API/UI repository and digest values from
-the build record, and copy the OAuth values from the command above. Do not use
-the release payload image itself as the OAuth proxy image.
+Edit the copied `deploy/openshift/local/build-test/install/kustomization.yaml`.
+The [example overlay](example/kustomization.yaml) already contains every required
+image entry and patch; replace its placeholders as follows:
 
-```yaml
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-namespace: aap-bridge-build-test
-resources:
-  - ../../../base
-images:
-  - name: aap-bridge-api
-    newName: REPLACE_WITH_API_REPOSITORY
-    digest: REPLACE_WITH_API_SHA256_DIGEST
-  - name: aap-bridge-ui
-    newName: REPLACE_WITH_UI_REPOSITORY
-    digest: REPLACE_WITH_UI_SHA256_DIGEST
-  - name: oauth-proxy
-    newName: REPLACE_WITH_OAUTH_PROXY_REPOSITORY
-    digest: REPLACE_WITH_OAUTH_PROXY_SHA256_DIGEST
-patches:
-  - target:
-      kind: PersistentVolumeClaim
-    patch: |-
-      - op: add
-        path: /spec/storageClassName
-        value: REPLACE_WITH_STORAGE_CLASS
-  - target:
-      kind: Route
-      name: aap-bridge
-    patch: |-
-      - op: add
-        path: /spec/host
-        value: REPLACE_WITH_ROUTE_HOST
-  - target:
-      kind: ServiceAccount
-      name: aap-bridge
-    patch: |-
-      - op: add
-        path: /imagePullSecrets
-        value:
-          - name: vendor-pull
-  - target:
-      kind: ServiceAccount
-      name: aap-bridge-db
-    patch: |-
-      - op: add
-        path: /imagePullSecrets
-        value:
-          - name: vendor-pull
-```
+| Setting in the copied overlay | Value |
+| --- | --- |
+| `namespace` | The literal value of `$NAMESPACE` used for the builds |
+| `resources` | Keep `../../../base` for this directory layout |
+| API and UI `newName` / `digest` | Copy the values printed from `images.yaml` |
+| OAuth proxy `newName` / `digest` | Copy the values printed by `oc adm release info` |
+| PVC patch `value` | Your existing storage class; applies to both PVCs |
+| Route patch `value` | An unused hostname under your cluster ingress domain |
+| ServiceAccount patches | Keep `vendor-pull` on both accounts if you created that Secret; otherwise remove both patches |
 
-The `../../../base` path is relative to this specific `install` directory. Remove
-any copied `newTag` fields when using `digest`; each digest includes its `sha256:`
-prefix. PostgreSQL remains vendor-sourced through the base manifests.
+Each digest includes its `sha256:` prefix. Use `digest` without `newTag` for the
+three image replacements. The OAuth image must be the release's **oauth-proxy
+component**, not the release payload itself. PostgreSQL remains vendor-sourced
+through the base manifests. Kubernetes does not expand `$NAMESPACE` in this YAML;
+enter the actual namespace name.
 
 Choose an existing storage class with `oc get storageclass`. This patch applies
 to both fresh PVCs (10 GiB PostgreSQL and 20 GiB artifacts). Choose an unused Route
@@ -341,17 +302,11 @@ oc create rolebinding aap-bridge-user -n "$NAMESPACE" \
   --role=aap-bridge-access --user=REPLACE_WITH_OPENSHIFT_USERNAME
 ```
 
-Validate server-side admission, build completion, image pulls, assigned UIDs,
-PVC binding/writes, database readiness, probes, internal API/nginx responses,
-and external Route TLS/OAuth redirect. Check `/api/versions` for populated choices.
-Test migration-state initialization against only the fresh database with
-`postgresql+psycopg2://`, and confirm credential redaction. Audit source inputs and
-final application files for private artifacts. Do not run AAP migrations or contact
-source/target endpoints as part of infrastructure validation.
-
-Keep a local dated record of the Git commit, Build names, output digests, workload
-status, Route URL, and checks. Browser login, connection configuration, authenticated
-WebSockets, migration execution, and backup/restore remain manual follow-up tests.
+At this point the instance is ready for manual login and connection configuration.
+The checks above validate infrastructure without contacting source/target AAP
+endpoints or running a migration. Browser login, connection tests, authenticated
+WebSockets, and backup/restore should be verified separately before relying on the
+instance. Saved connections are configured in the UI, not by build parameters.
 
 ## 4. Updates, manual promotion, and rollback
 
@@ -363,8 +318,9 @@ Complete active migrations before changing the working application; its `Recreat
 strategy causes downtime and restarts interrupt jobs. First record the current
 application image references and retain the existing Secrets, database, and PVCs.
 
-When pulling from a separate build namespace, grant only the consuming application's
-service account image-pull rights in the build namespace (substitute both names):
+Only if deploying into a **different namespace** from the builds, grant the
+consuming service account image-pull rights below. Skip this for the same-namespace
+installation used in sections 1–3. Substitute both namespace names:
 
 ```bash
 oc policy add-role-to-user system:image-puller \
@@ -379,7 +335,6 @@ the version endpoint. Building/promoting an ImageStreamTag is not a deployment.
 To roll back an image-only release, restore the recorded previous API/UI references
 in the overlay and reapply. This does not restore changed database data; changes
 with schema/data migrations require their own backup and compatibility plan.
-No source dependency or application schema change is part of this workflow.
 
 ## 5. Application operation and troubleshooting
 
@@ -402,17 +357,8 @@ Build troubleshooting:
   digests and apply it as described in sections 3 and 4.
 
 
-```bash
-oc get pods -n "$NAMESPACE" -o wide
-oc get events -n "$NAMESPACE" --sort-by=.lastTimestamp
-oc logs -n "$NAMESPACE" deployment/aap-bridge -c api --tail=50
-oc logs -n "$NAMESPACE" deployment/aap-bridge -c oauth-proxy --tail=50
-oc logs -n "$NAMESPACE" statefulset/aap-bridge-db --tail=50
-oc exec -n "$NAMESPACE" deployment/aap-bridge -c api -- python3.12 -c \
-  "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/api/versions').status)"
-oc exec -n "$NAMESPACE" deployment/aap-bridge -c ui -- \
-  curl --fail --silent --output /dev/null http://127.0.0.1:8080/
-```
+Use the events and container-log commands in section 3.3 to diagnose rollout
+failures. For build failures, use the Build names and commands in section 2.
 
 Check pod annotation `openshift.io/scc` and runtime `id`: workloads must use the
 cluster's restricted SCC and assigned IDs, not an `anyuid` exception. The image
@@ -509,14 +455,6 @@ retiring the build workflow. Build history retention does not prune registry sto
 Do not use `oc delete -k`, delete the namespace, or delete PVCs as routine teardown: those
 operations remove data claims. Final data destruction requires a separate,
 intentional action and consideration of the storage class's reclaim policy.
-
-## Validation boundary
-
-Infrastructure acceptance covers image build/pull, restricted admission, PVC
-binding/writes, PostgreSQL/API/nginx readiness, TLS and unauthenticated OAuth
-redirects. It does not log into the UI, create connections, contact AAP instances,
-or run migrations. Browser login, authenticated WebSockets, connection tests,
-and actual backup/restore remain separate follow-up checks.
 
 References: [Docker build strategy](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/builds_using_buildconfig/build-strategies),
 [ImageStream deployment triggers](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/images/triggering-updates-on-imagestream-changes),
