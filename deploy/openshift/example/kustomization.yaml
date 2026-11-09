@@ -2,7 +2,7 @@
 # Fill image entries from build-images.py output and the cluster OAuth component.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: aap-bridge-build-test
+namespace: aap-bridge
 resources:
   - ../../../base
 images:
