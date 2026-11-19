@@ -13,8 +13,6 @@ spec:
   successfulBuildsHistoryLimit: 3
   failedBuildsHistoryLimit: 3
   completionDeadlineSeconds: 1800
-  nodeSelector:
-    kubernetes.io/arch: amd64
   source:
     type: Git
     git:
