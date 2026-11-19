@@ -42,4 +42,4 @@ was performed. An amd64 image, authenticated Red Hat registry build, actual regi
 pull permissions, restricted-SCC admission, PVC/NFS permissions, PostgreSQL runtime
 connectivity, private-CA trust, actual AAP reads/migrations, Job handoff and restart
 persistence require operator validation. The manual acceptance checklist is in the
-[deployment guide](readme.md). Local tests do not establish OpenShift runtime behavior.
+[advanced guide](advanced.md#local-image-checks-and-manual-cluster-acceptance). Local tests do not establish OpenShift runtime behavior.
