@@ -36,9 +36,9 @@ Verify the remote is `JustinBatchelor/aap-bridge`, the published SHA is the inte
 commit, and the current cluster is the intended non-production environment.
 Confirm integrated registry availability, registry pull credentials, build
 permissions, namespace quota, storage provisioning and expansion support, and DNS,
-HTTPS, firewall and certificate trust to both AAP endpoints. The included build
-selects **amd64**; edit the build overlay below for an arm64 cluster. Confirm the
-PostgreSQL image supports that architecture too. The CLI and database PVC defaults
+HTTPS, firewall and certificate trust to both AAP endpoints. The CLI BuildConfig
+does not specify a node selector. Confirm the build node architecture is suitable
+for the deployment nodes and that PostgreSQL supports it. The CLI and database PVC defaults
 are 20 GiB and 10 GiB respectively, using the cluster default StorageClass.
 
 ```bash
@@ -79,19 +79,11 @@ oc apply -f deploy/openshift/local/cli/builds.yaml
 
 The inventory must be exactly `BuildConfig/aap-bridge-cli` and
 `ImageStream/aap-bridge-cli`. Do **not** apply `deploy/openshift/builds`, which builds
-API/UI images. CLI triggers are empty and builds run serially. For arm64, add this
-patch to the local build Kustomization before rendering:
+API/UI images. CLI triggers are empty and builds run serially. Scheduling uses the
+cluster defaults; this package does not restrict builds to an architecture.
 
-```yaml
-patches:
-- target:
-    kind: BuildConfig
-    name: aap-bridge-cli
-  patch: |-
-    - op: replace
-      path: /spec/nodeSelector/kubernetes.io~1arch
-      value: arm64
-```
+If you previously rendered the build manifest, rerun `oc kustomize` above before
+applying it. Editing the source BuildConfig does not update an existing rendered file.
 
 For a private Git fork, configure an appropriate BuildConfig `sourceSecret` through
 the local overlay; do not embed Git credentials in its URL.

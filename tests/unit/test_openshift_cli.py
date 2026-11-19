@@ -33,6 +33,7 @@ def test_cli_build_inventory():
     }
     bc = next(d["spec"] for d in docs if d["kind"] == "BuildConfig")
     assert bc["triggers"] == [] and bc["runPolicy"] == "Serial"
+    assert "nodeSelector" not in bc
     assert (
         bc["strategy"]["dockerStrategy"]["dockerfilePath"] == "deploy/openshift/Containerfile.cli"
     )
