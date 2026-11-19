@@ -34,6 +34,7 @@ use the guides below as the source of truth.
 | `.env`, tokens, `config.yaml` | [Configuration](docs/getting-started/configuration.md) |
 | Phases, resource order, resume | [Migration Workflow](docs/user-guide/migration-workflow.md) |
 | Commands | [CLI Reference](docs/user-guide/cli-reference.md) |
+| **CLI-only OpenShift (no Web UI packages)** | [CLI build, toolbox and Job guide](deploy/openshift/cli/readme.md) |
 | OpenShift deployment | [BuildConfig and ImageStream deployment guide](deploy/openshift/readme.md) |
 | Browser UI | [Web UI](docs/user-guide/web-ui.md) |
 | Version paths | [Compatibility Matrix](docs/reference/compatibility-matrix.md) |

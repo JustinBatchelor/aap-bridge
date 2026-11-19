@@ -18,7 +18,7 @@ from aap_migration.client.bulk_settings import (
     fetch_bulk_host_max_create,
 )
 from aap_migration.config import MigrationConfig
-from aap_migration.utils.logging import get_logger
+from aap_migration.utils.logging import get_logger, redact_database_url
 
 logger = get_logger(__name__)
 
@@ -95,7 +95,7 @@ def _display_config_summary(config: MigrationConfig) -> None:
     rows = [
         ["Source URL", config.source.url],
         ["Target URL", config.target.url],
-        ["State DB Path", str(config.state.db_path)],
+        ["State DB Path", redact_database_url(str(config.state.db_path))],
         ["Default Batch Size", config.performance.batch_sizes.get("default", "N/A")],
         ["Host Batch Size", config.performance.batch_sizes.get("hosts", "N/A")],
         ["Max Concurrent Requests", config.performance.max_concurrent],
@@ -111,6 +111,9 @@ def _display_config_summary(config: MigrationConfig) -> None:
 
 def _validate_paths(config: MigrationConfig) -> None:
     """Validate file paths in configuration."""
+    if str(config.state.db_path).startswith(("postgresql://", "postgresql+psycopg2://")):
+        echo_success("PostgreSQL state configured; filesystem path check skipped")
+        return
     db_path = Path(config.state.db_path)
     db_dir = db_path.parent
 
@@ -305,9 +308,4 @@ def show(ctx: MigrationContext) -> None:
         click.echo(f"    {resource_type}: {size}")
 
     click.echo("\nState Configuration:")
-    click.echo(f"  Database: {config.state.db_path}")
-
-    if config.migration_id:
-        click.echo(f"\nMigration ID: {config.migration_id}")
-    if config.migration_name:
-        click.echo(f"Migration Name: {config.migration_name}")
+    click.echo(f"  Database: {redact_database_url(str(config.state.db_path))}")

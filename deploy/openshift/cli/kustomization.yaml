@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../common
+- accounts.yaml
+- network-policies.yaml
+- toolbox.yaml
+configMapGenerator:
+- name: aap-bridge-cli-config
+  files:
+  - config.yaml
+generatorOptions:
+  disableNameSuffixHash: true

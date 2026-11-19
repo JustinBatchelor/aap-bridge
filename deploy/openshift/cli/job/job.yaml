@@ -1,0 +1,163 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aap-bridge-cli-run
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: aap-bridge-cli
+        component: job
+    spec:
+      serviceAccountName: aap-bridge-cli
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroupChangePolicy: OnRootMismatch
+      terminationGracePeriodSeconds: 60
+      initContainers:
+      - name: initialize-data
+        image: aap-bridge-cli
+        command:
+        - python3.12
+        args:
+        - -c
+        - |-
+          from pathlib import Path
+          for name in ('exports','xformed','schemas','reports','backups','logs'):
+              path=Path('/data')/name
+              path.mkdir(exist_ok=True)
+              probe=path/'.write-check'
+              probe.write_text('ok')
+              probe.unlink()
+        workingDir: /data
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '2'
+            memory: 4Gi
+        envFrom:
+        - secretRef:
+            name: aap-bridge
+        - secretRef:
+            name: aap-bridge-connections
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: tmp
+          mountPath: /tmp
+        - name: config
+          mountPath: /etc/aap-bridge
+          readOnly: true
+      - name: wait-for-database
+        image: aap-bridge-cli
+        command:
+        - python3.12
+        args:
+        - -c
+        - |-
+          import os, time
+          from sqlalchemy import create_engine, text
+          engine=create_engine(os.environ['MIGRATION_STATE_DB_PATH'], connect_args={'connect_timeout':5})
+          for attempt in range(60):
+              try:
+                  with engine.connect() as connection:
+                      connection.execute(text('SELECT 1'))
+                  break
+              except Exception:
+                  if attempt == 59:
+                      raise SystemExit('Database unavailable; check Service, credentials, and NetworkPolicy')
+                  time.sleep(5)
+        workingDir: /data
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '2'
+            memory: 4Gi
+        envFrom:
+        - secretRef:
+            name: aap-bridge
+        - secretRef:
+            name: aap-bridge-connections
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: tmp
+          mountPath: /tmp
+        - name: config
+          mountPath: /etc/aap-bridge
+          readOnly: true
+      containers:
+      - name: cli
+        image: aap-bridge-cli
+        command:
+        - aap-bridge
+        args:
+        - --config
+        - /etc/aap-bridge/config.yaml
+        - config
+        - validate
+        workingDir: /data
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '2'
+            memory: 4Gi
+        envFrom:
+        - secretRef:
+            name: aap-bridge
+        - secretRef:
+            name: aap-bridge-connections
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: tmp
+          mountPath: /tmp
+        - name: config
+          mountPath: /etc/aap-bridge
+          readOnly: true
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: aap-bridge-data
+      - name: tmp
+        emptyDir: {}
+      - name: config
+        configMap:
+          name: aap-bridge-cli-config
+      restartPolicy: Never

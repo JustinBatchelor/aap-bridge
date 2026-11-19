@@ -1,0 +1,20 @@
+ARG UBI_IMAGE=registry.redhat.io/ubi9/ubi-minimal:latest
+FROM ${UBI_IMAGE} AS builder
+RUN microdnf install -y python3.12 python3.12-pip python3.12-devel gcc libpq-devel && microdnf clean all
+WORKDIR /build
+COPY pyproject.toml README.md LICENSE ./
+COPY src/ src/
+RUN pip3.12 wheel --no-cache-dir --wheel-dir /wheels .
+
+FROM ${UBI_IMAGE}
+RUN microdnf install -y python3.12 python3.12-pip tar less && microdnf clean all
+COPY --from=builder /wheels /wheels
+RUN pip3.12 install --no-cache-dir --no-index --find-links=/wheels aap-bridge && rm -rf /wheels && mkdir -p /data && chgrp 0 /data && chmod g=u /data
+COPY config/ignored_endpoints.yaml config/mappings.yaml.example /app/config/
+RUN cp /app/config/mappings.yaml.example /app/config/mappings.yaml
+COPY deploy/openshift/cli/config.yaml /etc/aap-bridge/config.yaml
+ENV HOME=/tmp PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 AAP_BRIDGE_CONFIG=/etc/aap-bridge/config.yaml
+WORKDIR /data
+USER 1001
+ENTRYPOINT ["aap-bridge"]
+CMD ["--help"]

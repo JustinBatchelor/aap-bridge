@@ -12,6 +12,9 @@ in the repository.
 
 **New Features:**
 
+- CLI-only OpenShift builds, toolbox and Job deployment workflows with persistent
+  PostgreSQL state, restricted-SCC resources, package inspection and operator documentation.
+
 - AAP 2.7 supported as a migration source and target (same-or-forward paths only;
   see compatibility matrix).
 - Optional container CLI workflow: Podman Compose stack with bundled PostgreSQL and

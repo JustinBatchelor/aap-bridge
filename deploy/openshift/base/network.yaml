@@ -12,19 +12,6 @@ spec:
     port: 443
     targetPort: 8443
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: aap-bridge-db
-spec:
-  clusterIP: None
-  selector:
-    app: aap-bridge-db
-  ports:
-  - name: postgres
-    port: 5432
-    targetPort: 5432
----
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:

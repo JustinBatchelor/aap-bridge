@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aap-bridge-cli
+spec:
+  podSelector:
+    matchLabels:
+      app: aap-bridge-cli
+  policyTypes:
+  - Ingress
+  ingress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aap-bridge-db
+spec:
+  podSelector:
+    matchLabels:
+      app: aap-bridge-db
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: aap-bridge-cli
+    ports:
+    - protocol: TCP
+      port: 5432

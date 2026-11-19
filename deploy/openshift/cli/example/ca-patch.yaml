@@ -1,0 +1,19 @@
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: aap-ca
+    configMap:
+      name: aap-bridge-cli-ca
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: aap-ca
+    mountPath: /etc/aap-ca
+    readOnly: true
+- op: add
+  path: /spec/template/spec/containers/0/env
+  value:
+  - name: SSL_CERT_FILE
+    value: /etc/aap-ca/ca-bundle.pem
+  - name: REQUESTS_CA_BUNDLE
+    value: /etc/aap-ca/ca-bundle.pem

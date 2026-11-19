@@ -12,9 +12,8 @@ import yaml
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--namespace", default="aap-bridge")
-parser.add_argument(
-    "--output", type=Path, default=Path(__file__).parent / "local/secrets.yaml"
-)
+parser.add_argument("--output", type=Path, default=Path(__file__).parent / "local/secrets.yaml")
+parser.add_argument("--mode", choices=("web", "cli"), default="web")
 args = parser.parse_args()
 if args.output.suffix.lower() not in (".yaml", ".yml"):
     parser.error("--output must have a .yaml or .yml extension")
@@ -49,14 +48,17 @@ items = [
             "MIGRATION_STATE_DB_PATH": (
                 f"postgresql+psycopg2://aap_bridge:{password}@aap-bridge-db:5432/aap_bridge"
             ),
-            "AAP_BRIDGE_TOKEN_ENCRYPTION_KEY": base64.urlsafe_b64encode(os.urandom(32)).decode(),
         },
     ),
-    secret(
-        "aap-bridge-oauth",
-        {"cookie-secret": base64.b64encode(os.urandom(32)).decode()},
-    ),
 ]
+if args.mode == "web":
+    items[1]["stringData"]["AAP_BRIDGE_TOKEN_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(
+        os.urandom(32)
+    ).decode()
+    items.append(
+        secret("aap-bridge-oauth", {"cookie-secret": base64.b64encode(os.urandom(32)).decode()})
+    )
+
 args.output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 with os.fdopen(os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
     yaml.safe_dump_all(items, f, sort_keys=False)

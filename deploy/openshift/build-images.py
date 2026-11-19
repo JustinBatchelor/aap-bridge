@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build API and UI sequentially at one Git commit; record immutable image references.
+"""Build web images or the CLI image at one Git commit; record immutable image references.
 
 Requires the builds Kustomization to be applied first. Never deploys workloads.
 """
@@ -21,6 +21,7 @@ def oc(namespace, *args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--namespace", required=True)
+    parser.add_argument("--mode", choices=("web", "cli"), default="web")
     parser.add_argument("--commit", required=True, help="Published full Git commit SHA")
     parser.add_argument(
         "--output", type=Path, required=True, help="New local YAML record (.yaml or .yml)"
@@ -33,7 +34,7 @@ def main():
     if args.output.exists():
         parser.error("--output already exists; choose a new record to retain prior digests")
     records = []
-    for component in ("api", "ui"):
+    for component in (("cli",) if args.mode == "cli" else ("api", "ui")):
         name = "aap-bridge-" + component
         build = oc(args.namespace, "start-build", name, "--commit=" + args.commit, "-o", "name")
         print(f"Started {build}", flush=True)

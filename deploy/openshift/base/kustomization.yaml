@@ -2,11 +2,10 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
 - accounts.yaml
-- storage.yaml
 - network.yaml
 - network-policies.yaml
-- database.yaml
 - application.yaml
+- ../common
 configMapGenerator:
 - name: aap-bridge-config
   files:

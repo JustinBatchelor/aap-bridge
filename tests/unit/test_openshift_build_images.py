@@ -135,3 +135,92 @@ def test_secret_generator_yaml_output_and_permissions(tmp_path, extension):
     assert len(documents) == 3
     assert all(d["kind"] == "Secret" and d["metadata"]["namespace"] == "test" for d in documents)
     assert output.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("failure", [None, "phase", "revision", "digest", "existing"])
+def test_cli_build_only_and_verified(helper, monkeypatch, tmp_path, failure):
+    output = tmp_path / "cli.yaml"
+    commit = "a" * 40
+    calls = []
+    data = completed_build("aap-bridge-cli", commit)
+    if failure == "phase":
+        data["status"]["phase"] = "Failed"
+    elif failure == "revision":
+        data["spec"]["revision"]["git"]["commit"] = "b" * 40
+    elif failure == "digest":
+        data["status"]["output"]["to"]["imageDigest"] = ""
+    elif failure == "existing":
+        output.write_text("retain me")
+
+    def oc(namespace, *args):
+        calls.append(args)
+        assert namespace == "test"
+        if args[0] == "start-build":
+            assert args[1:] == ("aap-bridge-cli", "--commit=" + commit, "-o", "name")
+            return "build/aap-bridge-cli-1"
+        assert args == ("get", "build/aap-bridge-cli-1", "-o", "json")
+        return json.dumps(data)
+
+    monkeypatch.setattr(helper, "oc", oc)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build-images",
+            "--mode",
+            "cli",
+            "--namespace",
+            "test",
+            "--commit",
+            commit,
+            "--output",
+            str(output),
+        ],
+    )
+    if failure:
+        with pytest.raises(SystemExit):
+            helper.main()
+        if failure == "existing":
+            assert not calls
+            assert output.read_text() == "retain me"
+        else:
+            assert not output.exists()
+    else:
+        helper.main()
+        record = yaml.safe_load(output.read_text())["images"]
+        assert len(record) == 1
+        assert record[0]["name"] == "aap-bridge-cli"
+        assert record[0]["commit"] == commit
+        assert record[0]["digest"] == "sha256:" + "b" * 64
+        assert [c[0] for c in calls] == ["start-build", "get"]
+
+
+def test_cli_secrets_private_consistent_and_preserved(tmp_path):
+    script = Path(__file__).resolve().parents[2] / "deploy/openshift/generate-secrets.py"
+    output = tmp_path / "secrets.yaml"
+    args = [
+        sys.executable,
+        str(script),
+        "--mode",
+        "cli",
+        "--namespace",
+        "test",
+        "--output",
+        str(output),
+    ]
+    result = subprocess.run(args, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    original = output.read_text()
+    docs = {d["metadata"]["name"]: d for d in yaml.safe_load_all(original)}
+    assert set(docs) == {"aap-bridge", "aap-bridge-db"}
+    assert all(d["metadata"]["namespace"] == "test" for d in docs.values())
+    db = docs["aap-bridge-db"]["stringData"]
+    state = docs["aap-bridge"]["stringData"]
+    assert state == {
+        "MIGRATION_STATE_DB_PATH": f"postgresql+psycopg2://{db['POSTGRESQL_USER']}:{db['POSTGRESQL_PASSWORD']}@aap-bridge-db:5432/{db['POSTGRESQL_DATABASE']}"
+    }
+    assert db["POSTGRESQL_PASSWORD"] not in result.stdout + result.stderr
+    assert "cookie" not in original and "ENCRYPTION" not in original
+    assert output.stat().st_mode & 0o777 == 0o600
+    assert subprocess.run(args, capture_output=True).returncode != 0
+    assert output.read_text() == original

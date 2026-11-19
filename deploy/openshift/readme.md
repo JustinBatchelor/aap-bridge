@@ -1,5 +1,8 @@
 # Deploy AAP Bridge on OpenShift
 
+For a deployment without UI, nginx, or API containers, use the separate
+[CLI-only OpenShift guide](cli/readme.md).
+
 The supported OpenShift deployment workflow uses **BuildConfigs and ImageStreams**.
 OpenShift builds the API and UI from one published Git commit, stores their images
 in the integrated registry, and deploys explicitly selected immutable digests.
