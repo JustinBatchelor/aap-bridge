@@ -4,7 +4,7 @@ This installs the **AAP Bridge CLI and PostgreSQL**. No UI, nginx, Node/npm, OAu
 proxy, or API server is built or deployed. You open the CLI through `oc exec`.
 
 Use a fresh namespace with a working default StorageClass. You need `oc`, Python 3,
-Podman, Red Hat registry credentials, and access from the cluster to both AAP systems.
+and a cluster with working registry access and connectivity to both AAP systems.
 Defaults: **10 GiB database + 20 GiB artifacts**. For a different StorageClass or
 private AAP certificates, see [deployment options](advanced.md) before step 5.
 
@@ -37,17 +37,11 @@ export PYTHON="$PWD/.venv-cli-tools/bin/python"
 Change `NAMESPACE` to the name you want. If you already created that CLI-only
 namespace, skip `oc new-project`.
 
-## 2. Allow registry pulls
+## 2. Use the cluster's registry access
 
-Skip Secret creation if `vendor-pull` already exists in this namespace.
-
-```bash
-podman login --authfile "$LOCAL/registry-auth.json" registry.redhat.io
-oc -n "$NAMESPACE" create secret generic vendor-pull \
-  --type=kubernetes.io/dockerconfigjson \
-  --from-file=.dockerconfigjson="$LOCAL/registry-auth.json"
-oc -n "$NAMESPACE" secrets link builder vendor-pull --for=pull
-```
+If the cluster's global pull secret already has valid access to `registry.redhat.io`,
+continue to step 3. No extra registry Secret or ServiceAccount patch is needed.
+If pulls fail authentication, see [optional registry credentials](advanced.md#optional-registry-credentials).
 
 ## 3. Build the CLI image
 
@@ -101,14 +95,6 @@ images:
 - name: aap-bridge-cli
   newName: ${IMAGE%@*}
   digest: ${IMAGE#*@}
-patches:
-- target:
-    kind: ServiceAccount
-  patch: |-
-    - op: add
-      path: /imagePullSecrets
-      value:
-        - name: vendor-pull
 EOF
 ```
 

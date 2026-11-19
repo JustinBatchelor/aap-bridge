@@ -16,13 +16,43 @@ older browser revision `de39ede2b2c493513a469aa7a4eccd9f5ed4e994` cannot build i
 For a private Git fork, set the BuildConfig's `source.sourceSecret` using an appropriate
 Git authentication Secret. Do not put credentials in the repository URL.
 
+## Optional registry credentials
+
+Use the cluster's existing global pull secret when it has access to the required
+images. A separate namespace Secret is only needed when that access is unavailable
+and your cluster's registry policy permits namespace credentials. For mirrored
+registries, have the administrator configure the global credentials instead.
+
+If needed, create a private registry Secret using an interactive Podman login:
+
+```bash
+umask 077
+podman login --authfile deploy/openshift/local/cli/registry-auth.json registry.redhat.io
+oc -n "$NAMESPACE" create secret generic vendor-pull \
+  --type=kubernetes.io/dockerconfigjson \
+  --from-file=.dockerconfigjson=deploy/openshift/local/cli/registry-auth.json
+```
+
+After the CLI BuildConfig exists, configure it to use that Secret before retrying
+the build. For a PostgreSQL pull failure, link it to the database ServiceAccount
+after the installation resources exist:
+
+```bash
+oc -n "$NAMESPACE" set build-secret --pull bc/aap-bridge-cli vendor-pull
+oc -n "$NAMESPACE" secrets link aap-bridge-db vendor-pull --for=pull
+```
+
+Skip creation if the Secret already exists. Do not print or commit its credentials.
+
 ## StorageClass and PVC sizes
 
 The default is the cluster's default StorageClass with 10 GiB for PostgreSQL and
-20 GiB for artifacts. Before applying the installation, append this entry to the
-`patches` list in `deploy/openshift/local/cli/install/kustomization.yaml`:
+20 GiB for artifacts. Before applying the installation, add this `patches` section
+to `deploy/openshift/local/cli/install/kustomization.yaml` (append the entry if the
+list already exists):
 
 ```yaml
+patches:
 - target:
     kind: PersistentVolumeClaim
   patch: |-
@@ -56,10 +86,10 @@ cp deploy/openshift/cli/example/ca-patch.yaml deploy/openshift/local/cli/install
 cp deploy/openshift/cli/example/ca-patch.yaml deploy/openshift/local/cli/job/ca-patch.yaml
 ```
 
-Append this entry to each overlay's
-`patches` list (create the list in the Job overlay):
+Add this `patches` section to each overlay (append the entry if its list already exists):
 
 ```yaml
+patches:
 - target:
     kind: Deployment|Job
     name: aap-bridge-cli.*
