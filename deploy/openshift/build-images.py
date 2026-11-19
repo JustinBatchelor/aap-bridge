@@ -15,7 +15,7 @@ import yaml
 
 
 def oc(namespace, *args):
-    return subprocess.check_output(["oc", "-n", namespace, *args], text=True).strip()
+    return subprocess.check_output(["oc", "-n", namespace, *args], universal_newlines=True).strip()
 
 
 def main():

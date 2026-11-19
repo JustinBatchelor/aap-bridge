@@ -35,6 +35,25 @@ records the immutable local image ID, architecture and package versions. It cont
 no customer credentials. Re-run `check-image.py` against the actual promoted image
 and retain the new inventory separately; this record is not a vulnerability scan.
 
+## Client helper compatibility
+
+On 2026-11-19, the deployment helpers passed three compatibility tests under an
+actual Python 3.6.15 interpreter with PyYAML 6.0.1. These tests use simulated `oc`
+and Podman executables to exercise build selection and digest records, Secret
+permissions and database-URL consistency, overwrite refusal, and the image checker's
+host-side subprocess calls. They do not contact a cluster or validate an image.
+The focused suite also passed under Python 3.12: 23 tests plus four subtests.
+
+To repeat the compatibility checks with either interpreter and the matching
+`deploy/openshift/requirements-tools.txt` dependencies:
+
+```bash
+python3 -m unittest discover -s tests/compat -v
+```
+
+Only the client-side deployment helpers support Python 3.6. The application and
+image-side checks continue to run under Python 3.12 inside the container.
+
 ## Awaiting operator deployment
 
 No cluster build, image push, workload deployment, or customer-environment change

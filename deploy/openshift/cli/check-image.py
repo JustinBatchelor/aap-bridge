@@ -23,7 +23,7 @@ def main():
     if inventory.exists() or log.exists():
         parser.error("Choose a new output directory; previous evidence is retained")
     inspect = json.loads(
-        subprocess.check_output(["podman", "image", "inspect", args.image], text=True)
+        subprocess.check_output(["podman", "image", "inspect", args.image], universal_newlines=True)
     )[0]
     # Use the inspected immutable local ID for every check.
     image = inspect["Id"]
@@ -57,7 +57,7 @@ def main():
     def run(entrypoint, *command):
         return subprocess.check_output(
             [*base, "--entrypoint", entrypoint, image, *command],
-            text=True,
+            universal_newlines=True,
             stderr=subprocess.STDOUT,
         )
 

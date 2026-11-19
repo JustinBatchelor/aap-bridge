@@ -28,7 +28,7 @@ the workload directly using `oc exec` or port forwarding.
 Requirements:
 
 - OpenShift 4.x with integrated OAuth, ingress, and service-serving certificates.
-- `oc`, Python 3 with PyYAML, registry credentials, and permission to create a project,
+- `oc`, Python 3.6+ with PyYAML, registry credentials, and permission to create a project,
   BuildConfigs, ImageStreams, workloads, Secrets, Roles, NetworkPolicies and PVCs.
   Podman is optional for creating a dedicated vendor authentication file.
 - An amd64 worker (the documented builds target linux/amd64).
@@ -235,7 +235,8 @@ python3 deploy/openshift/generate-secrets.py --namespace "$NAMESPACE" \
 oc create -n "$NAMESPACE" -f deploy/openshift/local/build-test/secrets.yaml
 ```
 
-The generator requires Python 3 with PyYAML and refuses to overwrite an existing
+The generator requires Python 3.6+ with PyYAML (install from
+`deploy/openshift/requirements-tools.txt`) and refuses to overwrite an existing
 file. Use a new output filename if one remains from a previous installation, and
 use the same filename in `oc create`. If only some Secrets exist, resolve the
 partial installation using its original generated file rather than regenerating

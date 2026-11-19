@@ -3,7 +3,7 @@
 This installs the **AAP Bridge CLI and PostgreSQL**. No UI, nginx, Node/npm, OAuth
 proxy, or API server is built or deployed. You open the CLI through `oc exec`.
 
-Use a fresh namespace with a working default StorageClass. You need `oc`, Python 3,
+Use a fresh namespace with a working default StorageClass. You need `oc`, Python 3.6 or newer,
 and a cluster with working registry access and connectivity to both AAP systems.
 Defaults: **10 GiB database + 20 GiB artifacts**. For a different StorageClass or
 private AAP certificates, see [deployment options](advanced.md) before step 5.
@@ -30,9 +30,12 @@ oc new-project "$NAMESPACE"
 umask 077
 mkdir -p "$LOCAL/install"
 python3 -m venv .venv-cli-tools
-.venv-cli-tools/bin/pip install PyYAML
+.venv-cli-tools/bin/python -m pip install -r deploy/openshift/requirements-tools.txt
 export PYTHON="$PWD/.venv-cli-tools/bin/python"
 ```
+
+The local helpers support Python 3.6; migrations run with Python 3.12 inside the
+container. The requirements file selects a compatible PyYAML release.
 
 Change `NAMESPACE` to the name you want. If you already created that CLI-only
 namespace, skip `oc new-project`.

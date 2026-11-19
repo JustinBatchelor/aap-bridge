@@ -1,0 +1,3 @@
+# Client-side deployment helpers only; application dependencies are unchanged.
+PyYAML==6.0.1; python_version < "3.8"
+PyYAML>=6.0.2,<7; python_version >= "3.8"
