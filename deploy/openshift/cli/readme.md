@@ -124,6 +124,10 @@ Validate your configuration, then launch the interactive menu:
 oc exec -n "$NAMESPACE" deployment/aap-bridge-cli -c cli -- \
   aap-bridge --config /etc/aap-bridge/config.yaml config validate
 
+oc exec -n "$NAMESPACE" deployment/aap-bridge-cli -c cli -- \
+  aap-bridge --config /etc/aap-bridge/config.yaml \
+  config validate --check-connectivity
+
 oc exec -it -n "$NAMESPACE" deployment/aap-bridge-cli -c cli -- \
   aap-bridge --config /etc/aap-bridge/config.yaml
 ```
