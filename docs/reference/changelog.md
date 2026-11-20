@@ -12,6 +12,8 @@ in the repository.
 
 **New Features:**
 
+- Interactive exported credential password/PAT editor with name/ID selection, hidden
+  input, atomic private-file updates, Python 3.6 compatibility, and CLI pod instructions.
 - CLI-only OpenShift builds, toolbox and Job deployment workflows with persistent
   PostgreSQL state, restricted-SCC resources, package inspection and operator documentation.
 

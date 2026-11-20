@@ -13,6 +13,8 @@ pre-commit / CI via `tools/check_changelog_periods.py` on this file and
 
 ### Added
 
+- Interactive exported credential password/PAT editor with name/ID selection, hidden
+  input, atomic private-file updates, Python 3.6 compatibility, and CLI pod instructions.
 - CLI-only OpenShift builds, toolbox and Job deployment workflows with persistent
   PostgreSQL state, restricted-SCC resources, package inspection and operator documentation.
 
