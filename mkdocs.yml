@@ -41,6 +41,7 @@ nav:
       - Web UI: user-guide/web-ui.md
       - Disconnected Environment: user-guide/disconnected-environment.md
       - Migration Workflow: user-guide/migration-workflow.md
+      - Update Exported Credentials: user-guide/updating-exported-credentials.md
       - Filtering and Skipping: user-guide/filtering-and-skipping.md
       - Troubleshooting: user-guide/troubleshooting.md
   - Developer Guide:

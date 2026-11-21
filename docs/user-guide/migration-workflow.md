@@ -106,6 +106,16 @@ exports/
 
 ```
 
+### Update exported credential secrets before transformation
+
+The source API returns `$encrypted$` for credential secrets. For passwords or
+repository PATs stored in `inputs.password`, use
+[`tools/update_exported_credential.py`](updating-exported-credentials.md) after
+Export and before Transform and the credential's first Phase 1 import. The helper
+selects a source credential and prompts for the replacement secret without echo.
+See [Update Exported Credentials](updating-exported-credentials.md) for local and
+OpenShift instructions, rerun behavior, and limitations.
+
 ## Phase 3: Transform
 
 ```bash

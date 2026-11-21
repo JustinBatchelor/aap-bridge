@@ -1,5 +1,9 @@
 # Set an exported repository credential's PAT
 
+For the complete workflow, options, and troubleshooting, see
+[Update Exported Credentials](../../../docs/user-guide/updating-exported-credentials.md).
+The commands below run the helper against an existing OpenShift CLI deployment.
+
 Use this after **Export**, before **Transform and the credential's first Phase 1
 import**. For a Source Control credential using HTTPS, the repository PAT is stored
 in `inputs.password`. Its username must match the repository's authentication method.
@@ -10,8 +14,10 @@ Bridge normally skips previously imported credentials.
 
 ## Run in the existing Bridge pod
 
-Pull the latest `feat/openshift-cli` branch on your workstation. From the repository
-root, copy the script into the running Bridge pod; no image rebuild is needed:
+Use a checkout containing `tools/update_exported_credential.py` on your workstation.
+Set `NAMESPACE` to the existing CLI deployment's namespace and stop export, transform,
+and import operations while editing. From the repository root, copy the script
+into the running Bridge pod; no image rebuild is needed:
 
 ```bash
 oc -n "$NAMESPACE" exec -i deployment/aap-bridge-cli -c cli -- \
