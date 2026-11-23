@@ -13,6 +13,8 @@ pre-commit / CI via `tools/check_changelog_periods.py` on this file and
 
 ### Added
 
+- Bulk exported credential secret replacement from same-source JSON dumps, with
+  read-only preview, strict ID/name validation, private chunk writes, and stdin support.
 - Interactive exported credential password/PAT editor with name/ID selection, hidden
   input, atomic private-file updates, Python 3.6 compatibility, and CLI pod instructions.
 - CLI-only OpenShift builds, toolbox and Job deployment workflows with persistent

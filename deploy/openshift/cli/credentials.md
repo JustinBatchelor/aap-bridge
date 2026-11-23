@@ -1,18 +1,18 @@
-# Set an exported repository credential's PAT
+# Fill exported credential secrets
 
 For the complete workflow, options, and troubleshooting, see
 [Update Exported Credentials](../../../docs/user-guide/updating-exported-credentials.md).
 The commands below run the helper against an existing OpenShift CLI deployment.
 
 Use this after **Export**, before **Transform and the credential's first Phase 1
-import**. For a Source Control credential using HTTPS, the repository PAT is stored
-in `inputs.password`. Its username must match the repository's authentication method.
+import**. Bulk mode replaces `$encrypted$` input values from a plaintext JSON dump
+of the same source AAP instance. It matches source IDs and requires matching names.
 
 The helper edits the raw export only. It does not contact AAP or start project syncs.
 If the credential was already imported, update it directly in target AAP instead;
 Bridge normally skips previously imported credentials.
 
-## Run in the existing Bridge pod
+## Copy the helper into the existing Bridge pod
 
 Use a checkout containing `tools/update_exported_credential.py` on your workstation.
 Set `NAMESPACE` to the existing CLI deployment's namespace and stop export, transform,
@@ -20,11 +20,59 @@ and import operations while editing. From the repository root, copy the script
 into the running Bridge pod; no image rebuild is needed:
 
 ```bash
+export NAMESPACE=aap-bridge-cli
+
 oc -n "$NAMESPACE" exec -i deployment/aap-bridge-cli -c cli -- \
   sh -c 'umask 077; cat > /tmp/update_exported_credential.py' \
   < tools/update_exported_credential.py
 ```
 
+## Bulk-fill secrets from the supplied JSON
+
+Keep the supplied JSON on your workstation, outside Git. Its format must be
+`{"credentials": [...]}`, with each credential containing `id`, `name`, and
+`inputs`. Stop export, transform, and import commands before proceeding.
+Set the path to your actual file, then preview replacements:
+
+```bash
+export CREDENTIALS_FILE=/secure/path/credentials.json
+chmod 600 "$CREDENTIALS_FILE"
+
+oc -n "$NAMESPACE" exec -i deployment/aap-bridge-cli -c cli -- \
+  python3.12 /tmp/update_exported_credential.py --credentials-file - \
+  < "$CREDENTIALS_FILE"
+```
+
+The preview lists credential IDs, names, and field paths, without showing secrets
+or editing exports. Every encrypted input must have a real, non-empty string in
+the supplied file. Missing values or mismatched names block **all edits**.
+Once the preview succeeds, apply:
+
+```bash
+oc -n "$NAMESPACE" exec -i deployment/aap-bridge-cli -c cli -- \
+  python3.12 /tmp/update_exported_credential.py --credentials-file - --apply \
+  < "$CREDENTIALS_FILE"
+```
+
+The file is streamed over stdin; no separate plaintext dump is stored in the pod.
+Only exact `$encrypted$` values under credential `inputs` are replaced, including
+passwords, tokens, and SSH keys. Existing plaintext inputs and metadata are preserved.
+Unused supplied credentials are allowed and counted. Exported chunks now contain
+plaintext secrets with mode `0600`; protect the artifact volume and backups.
+
+Each changed chunk is replaced atomically, but the whole batch is not one filesystem
+transaction. If writing fails, review the completed/pending chunk report, stop other
+writers, and rerun; already-filled inputs remain untouched. The script exits nonzero
+for validation or write failures. Do not proceed to Transform until it succeeds.
+
+Then run **option 3 — Transform**, followed by **option 4 — Phase 1 import**.
+Keep Phase 2 paused until all required target SCM credentials are valid. Fresh
+exports restore `$encrypted$` placeholders, so repeat this process after re-exporting.
+
+## Update one repository password/PAT interactively
+
+For a Source Control credential using HTTPS, the repository PAT is stored in
+`inputs.password`. Its username must match the repository's authentication method.
 Run the helper interactively:
 
 ```bash

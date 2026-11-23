@@ -139,7 +139,7 @@ for export, transform, and import.
 
 ## When you need more
 
-- [Set an exported credential's PAT before transformation and import](credentials.md).
+- [Fill exported secrets from a credential dump or enter one PAT](credentials.md).
 - [Run a command as a Job](jobs.md) — stop the toolbox first; never run both at once.
 - [Back up, upgrade, roll back, or remove the installation](operations.md).
 - [Storage, private certificates, lab settings, and troubleshooting](advanced.md).

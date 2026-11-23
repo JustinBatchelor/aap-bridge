@@ -1,18 +1,17 @@
 # Update exported credential data
 
-Use `tools/update_exported_credential.py` to replace an exported credential's
-`inputs.password` with a real password or personal access token (PAT). This is
-useful for HTTPS Source Control credentials because the source API returns
-`$encrypted$` in place of the secret.
+Use `tools/update_exported_credential.py` to replace `$encrypted$` values under
+exported credential `inputs`. Supply a plaintext credential dump for bulk replacement,
+or select one credential and enter its password/PAT interactively.
 
 Run the helper **after Export, before Transform and the credential's first Phase 1
 import**. It edits local raw export files without contacting AAP. It requires
-Python 3.6 or newer, the standard library, and an interactive terminal.
+Python 3.6 or newer and the standard library. Only interactive mode needs a terminal.
 
-The helper changes only `inputs.password` on one credential per run. It does not
-replace SSH keys, usernames, other secret fields, or all `$encrypted$` values.
-For HTTPS repository access, ensure the exported username matches your repository's
-authentication method and the source projects reference the intended credential.
+Bulk mode handles passwords, tokens, SSH keys, and other encrypted input fields.
+It preserves existing plaintext inputs and all metadata. For HTTPS repository access,
+ensure the exported username matches your repository's authentication method and
+the source projects reference the intended credential.
 
 ## 1. Choose the raw export directory
 
@@ -31,7 +30,62 @@ For an existing OpenShift CLI deployment, use the
 [pod instructions][openshift-credentials] to copy and run the
 helper on the artifact volume. No image rebuild is required.
 
-## 2. Select a credential and enter its secret
+## 2. Bulk-fill from a plaintext credential dump
+
+The supplied file must come from the **same source AAP instance** as the export.
+It must be a JSON object with a `credentials` array. Each record needs an integer
+source `id`, exact `name`, and an `inputs` object, for example:
+
+```json
+{
+  "credentials": [
+    {
+      "id": 12,
+      "name": "Private repo PAT",
+      "inputs": {"password": "synthetic-example-only"}
+    }
+  ]
+}
+```
+
+Extra metadata such as `organization`, `credential_type`, and `external_input_fields`
+is allowed and is not copied over the export. Keep the actual plaintext dump outside
+Git with restricted permissions. Preview first:
+
+```bash
+python3 tools/update_exported_credential.py \
+  --credentials-file /secure/path/credentials.json --export-dir ./exports
+```
+
+The helper scans all credential chunks, matches by source ID, verifies exact names,
+and reports matched field paths and unused supplied record counts. It never matches
+by name alone or prints secret values. Every exact `$encrypted$` string under
+`inputs`, including nested dictionaries/lists, requires a supplied non-empty string
+at the same path. Missing, null, empty, non-string, or still-encrypted values block
+all edits. Duplicate IDs, duplicate JSON keys, invalid records, and name mismatches
+are also refused. Credentials without placeholders need no supplied record; unused
+supplied records are allowed.
+
+Apply only after preview succeeds:
+
+```bash
+python3 tools/update_exported_credential.py \
+  --credentials-file /secure/path/credentials.json --export-dir ./exports --apply
+```
+
+Changed chunks are staged privately and replaced with mode `0600`; other resource
+exports and existing plaintext values remain unchanged. The supplied file is read
+only. Each chunk replacement is atomic; multiple replacements are **not** one
+transaction. A write failure returns a nonzero status and lists completed/pending
+chunks. Stop other writers and rerun safely to fill remaining placeholders. Validation
+failures never modify exports. A successful rerun with no placeholders makes no edits.
+
+`--credentials-file -` reads the dump from stdin without requiring a terminal. The
+[OpenShift pod instructions][openshift-credentials] show how to stream the local file
+into the pod without storing an extra copy. Bulk mode cannot be combined with
+`--credential-id`, and `--apply` requires bulk mode.
+
+## Alternative: select one credential and enter its password/PAT
 
 For a local export:
 
@@ -67,6 +121,8 @@ python3 tools/update_exported_credential.py --export-dir ./exports --credential-
 | --- | --- |
 | `--export-dir PATH` | Raw export root; defaults to `/data/exports` when omitted. |
 | `--credential-id ID` | Positive source credential ID; omit to select interactively. |
+| `--credentials-file PATH` | Bulk input JSON; `-` reads stdin. Defaults to preview. |
+| `--apply` | Write fully validated bulk replacements. |
 | `--help` | Show usage without editing files. |
 
 On success, the helper prints the updated chunk path and its mode (`0600`). It
@@ -78,7 +134,7 @@ helper for each credential whose password needs replacement.
 ## 3. Transform, then import
 
 Run Transform against the edited raw export. If you transformed before editing,
-rerun Transform so the updated password reaches the data used by Import. For a
+rerun Transform so the updated secrets reach the data used by Import. For a
 local CLI workflow with `./exports` and `./transformed`:
 
 ```bash
@@ -93,7 +149,7 @@ aap-bridge import --input ./transformed --phase phase1
 ```
 
 In the interactive menu, use **option 3 — Transform**, then **option 4 — Phase 1
-import**. The supplied password is preserved through transformation and sent when
+import**. The supplied secrets are preserved through transformation and sent when
 the target credential is created. Keep Phase 2 paused until all required target
 SCM credentials are valid; remaining `$encrypted$` fields become temporary values
 during transformation and cannot authenticate project syncs.
@@ -112,7 +168,9 @@ again. Repeat the replacement and Transform before the first credential import.
 | --- | --- |
 | No `credentials_*.json` files found | Check `--export-dir` points to the raw root and that credentials were exported. |
 | Missing or duplicate source ID | Check the selected source ID and ensure the export contains exactly one matching record. |
-| No `inputs.password` field | Check the credential type; this helper requires an existing password field. |
+| Bulk: missing real value or mismatched name | Correct the supplied dump for the same source instance; all placeholders must resolve before any edits. |
+| Bulk: writing stopped | Review completed/pending chunks, stop other writers, and rerun before transforming. |
+| No `inputs.password` field | Interactive mode requires a password field; use bulk mode for other encrypted inputs. |
 | Interactive terminal or hidden input unavailable | Use a terminal; for OpenShift, run with `oc exec -it`. |
 | Empty, `$encrypted$`, or mismatched secret | Rerun and enter the same non-empty real password or PAT twice. |
 | Invalid JSON or symbolic-link chunk | Correct the raw export layout or regenerate it before retrying. |

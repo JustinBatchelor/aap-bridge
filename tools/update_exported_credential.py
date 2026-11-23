@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Set a password/PAT in a raw credential export before transformation and first import.
+"""Fill secrets in raw credential exports before transformation and first import.
 
 Python 3.6+; standard library only. This edits local files and does not contact AAP.
 """
@@ -141,8 +141,203 @@ def write_credential(path, original, records):
             os.unlink(temporary_path)
 
 
+def parse_json(contents, label):
+    """Reject ambiguous JSON without including its potentially secret contents in errors."""
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate key")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("non-JSON constant")
+
+    try:
+        return json.loads(
+            contents, object_pairs_hook=unique_object, parse_constant=invalid_constant
+        )
+    except (ValueError, UnicodeError):
+        raise ExportUpdateError(f"Invalid JSON or duplicate object keys in {label}.") from None
+
+
+def index_credentials(records, label):
+    if not isinstance(records, list):
+        raise ExportUpdateError(f"Expected a credential array in {label}.")
+    indexed = {}
+    for record in records:
+        if not isinstance(record, dict):
+            raise ExportUpdateError(f"Expected credential objects in {label}.")
+        credential_id = record.get("id")
+        if type(credential_id) is not int or credential_id <= 0:
+            raise ExportUpdateError(f"Invalid credential source ID in {label}.")
+        if credential_id in indexed:
+            raise ExportUpdateError(f"Duplicate credential source ID {credential_id} in {label}.")
+        if not isinstance(record.get("name"), str) or not record["name"]:
+            raise ExportUpdateError(f"Missing credential name for source ID {credential_id}.")
+        if not isinstance(record.get("inputs"), dict):
+            raise ExportUpdateError(f"Expected inputs object for source ID {credential_id}.")
+        indexed[credential_id] = record
+    return indexed
+
+
+def encrypted_paths(value, path=()):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield from encrypted_paths(child, path + (key,))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from encrypted_paths(child, path + (index,))
+    elif value == "$encrypted$":
+        yield path
+
+
+def field_name(path):
+    return "inputs" + "".join(f"[{part}]" if isinstance(part, int) else "." + part for part in path)
+
+
+def replacement_at(inputs, path):
+    value = inputs
+    for part in path:
+        if isinstance(part, int):
+            if not isinstance(value, list) or part >= len(value):
+                return None
+        elif not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    return value
+
+
+def apply_bulk(chunks):
+    """Stage all changed chunks first; individual replacements are atomic, the batch is not."""
+    staged = []
+    completed = []
+    try:
+        for path, original, records in chunks:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=str(path.parent), delete=False
+            ) as stream:
+                staged.append((path, original, stream.name))
+                json.dump(records, stream, indent=2)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+        # Check the entire batch before the first replacement, then again before each write.
+        for path, original, _ in staged:
+            if path.is_symlink() or path.read_bytes() != original:
+                raise ExportUpdateError("An export changed during validation; stop other writers.")
+        for path, original, temporary_path in staged:
+            if path.is_symlink() or path.read_bytes() != original:
+                raise ExportUpdateError("An export changed during writing; stop other writers.")
+            os.replace(temporary_path, str(path))
+            completed.append(path.name)
+            print(f"Updated {path.name} (mode 0600).")
+    except (OSError, ExportUpdateError, KeyboardInterrupt) as error:
+        pending = [path.name for path, _, _ in chunks if path.name not in completed]
+        detail = (
+            (error.strerror or "filesystem operation failed")
+            if isinstance(error, OSError)
+            else str(error)
+        )
+        raise ExportUpdateError(
+            "Writing stopped: {}. Completed chunks: {}. Pending chunks: {}. "
+            "Stop other writers and rerun to process remaining placeholders.".format(
+                detail or "interrupted",
+                ", ".join(completed) or "none",
+                ", ".join(pending) or "none",
+            )
+        ) from None
+    finally:
+        for _, _, temporary_path in staged:
+            if os.path.exists(temporary_path):
+                os.unlink(temporary_path)
+
+
+def bulk_update(credentials_file, export_dir, apply=False):
+    if credentials_file == "-":
+        contents = sys.stdin.read()
+    else:
+        source_path = Path(credentials_file)
+        if source_path.is_symlink():
+            raise ExportUpdateError("The supplied credential file must not be a symbolic link.")
+        contents = source_path.read_bytes()
+    document = parse_json(contents, "the supplied credential file")
+    if not isinstance(document, dict) or "credentials" not in document:
+        raise ExportUpdateError('Expected a JSON object containing a "credentials" array.')
+    supplied = index_credentials(document["credentials"], "the supplied credential file")
+    files = sorted((export_dir / "credentials").glob("credentials_*.json"))
+    if not files:
+        raise ExportUpdateError("No credentials_*.json files found under the export directory.")
+    chunks, seen, used, issues = [], set(), set(), []
+    resolved = 0
+    for path in files:
+        if path.is_symlink():
+            raise ExportUpdateError("Credential export files must not be symbolic links.")
+        original = path.read_bytes()
+        records = parse_json(original, path.name)
+        indexed = index_credentials(records, path.name)
+        duplicates = seen.intersection(indexed)
+        if duplicates:
+            raise ExportUpdateError(
+                "Duplicate credential source IDs across export chunks: {}.".format(
+                    ", ".join(str(value) for value in sorted(duplicates))
+                )
+            )
+        seen.update(indexed)
+        changed = False
+        for credential_id, record in indexed.items():
+            candidate = supplied.get(credential_id)
+            identity = "{} | {}".format(credential_id, record["name"])
+            if candidate is not None and candidate["name"] != record["name"]:
+                issues.append(f"{identity}: supplied name does not match this source ID")
+                continue
+            for field_path in list(encrypted_paths(record["inputs"])):
+                replacement = replacement_at(candidate["inputs"], field_path) if candidate else None
+                if (
+                    not isinstance(replacement, str)
+                    or not replacement
+                    or replacement == "$encrypted$"
+                ):
+                    issues.append(f"{identity}: no real value for {field_name(field_path)}")
+                    continue
+                target = record["inputs"]
+                for part in field_path[:-1]:
+                    target = target[part]
+                target[field_path[-1]] = replacement
+                print(f"Matched {identity}: {field_name(field_path)}")
+                used.add(credential_id)
+                resolved += 1
+                changed = True
+        if changed:
+            chunks.append((path, original, records))
+    print(
+        f"Resolved fields: {resolved}. Changed chunks: {len(chunks)}. "
+        f"Supplied credentials unused for replacements: {len(set(supplied) - used)}."
+    )
+    if issues:
+        for issue in issues:
+            print(f"Unresolved: {issue}", file=sys.stderr)
+        raise ExportUpdateError("Validation failed; no export files were changed.")
+    if not apply:
+        print("Preview only; no files changed. Rerun with --apply to write replacements.")
+    elif chunks:
+        apply_bulk(chunks)
+        print("All credential input placeholders resolved. No AAP changes were made.")
+        print("Next: transform, then first-time Phase 1 import.")
+    else:
+        print("No credential input placeholders remain; no files changed.")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--credentials-file",
+        help='Bulk JSON file containing {"credentials": [...]} (- reads stdin); preview by default',
+    )
+    parser.add_argument("--apply", action="store_true", help="Write validated bulk replacements")
     parser.add_argument(
         "--credential-id",
         type=positive_id,
@@ -155,7 +350,13 @@ def main(argv=None):
         help="Raw export root (default: /data/exports)",
     )
     args = parser.parse_args(argv)
+    if args.credentials_file is not None and args.credential_id is not None:
+        parser.error("--credentials-file cannot be combined with --credential-id")
+    if args.apply and args.credentials_file is None:
+        parser.error("--apply requires --credentials-file")
     try:
+        if args.credentials_file is not None:
+            return bulk_update(args.credentials_file, args.export_dir, args.apply)
         path, original, records, credential = find_credential(args.export_dir, args.credential_id)
         print(
             "Selected: {} (source ID {})".format(
@@ -165,7 +366,12 @@ def main(argv=None):
         credential["inputs"]["password"] = read_password()
         write_credential(path, original, records)
     except (ExportUpdateError, OSError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        detail = (
+            (error.strerror or "filesystem operation failed")
+            if isinstance(error, OSError)
+            else str(error)
+        )
+        print(f"Error: {detail}", file=sys.stderr)
         return 1
     except (EOFError, KeyboardInterrupt):
         print("Cancelled; export not updated.", file=sys.stderr)
