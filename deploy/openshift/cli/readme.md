@@ -141,6 +141,7 @@ for export, transform, and import.
 
 - [Fill exported secrets from a credential dump or enter one PAT](credentials.md).
 - [Recover projects rejected during Manual creation](project-recovery.md).
+- [Skip a project and its dependent automation](project-exclusion.md).
 - [Run a command as a Job](jobs.md) — stop the toolbox first; never run both at once.
 - [Back up, upgrade, roll back, or remove the installation](operations.md).
 - [Storage, private certificates, lab settings, and troubleshooting](advanced.md).

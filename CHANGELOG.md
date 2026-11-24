@@ -13,6 +13,8 @@ pre-commit / CI via `tools/check_changelog_periods.py` on this file and
 
 ### Added
 
+- Offline project exclusion with a reviewed, private filtered copy of transformed
+  data, transitive automation filtering, and a CLI Phase 2 recovery procedure.
 - Bulk exported credential secret replacement from same-source JSON dumps, with
   read-only preview, strict ID/name validation, private chunk writes, and stdin support.
 - Interactive exported credential password/PAT editor with name/ID selection, hidden
