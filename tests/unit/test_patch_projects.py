@@ -62,6 +62,19 @@ def test_scm_fields_match_requires_matching_git_refspec() -> None:
     assert _scm_fields_match(target, deferred, ctx) is False
 
 
+def test_scm_fields_match_requires_matching_submodule_option() -> None:
+    ctx = _ctx_with_mappings()
+    deferred = {
+        "scm_type": "git",
+        "scm_url": "https://example.com/repo.git",
+        "scm_track_submodules": True,
+    }
+    target = {**deferred, "scm_track_submodules": False}
+    assert _scm_fields_match(target, deferred, ctx) is False
+    target["scm_track_submodules"] = True
+    assert _scm_fields_match(target, deferred, ctx) is True
+
+
 def test_scm_fields_match_requires_mapped_credential_when_deferred() -> None:
     ctx = _ctx_with_mappings(credential_map={7: 70})
     deferred = {

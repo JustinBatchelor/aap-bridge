@@ -12,6 +12,8 @@ in the repository.
 
 **New Features:**
 
+- Fixed deferred project submodule tracking during Manual creation and Phase 2 restoration,
+  with offline artifact repair and a CLI project recovery procedure.
 - Bulk exported credential secret replacement from same-source JSON dumps, with
   read-only preview, strict ID/name validation, private chunk writes, and stdin support.
 - Interactive exported credential password/PAT editor with name/ID selection, hidden

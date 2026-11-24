@@ -31,8 +31,7 @@ async def test_patch_returns_patched_count(tmp_path: Path) -> None:
     """Successful patches must populate run_stats-compatible imported count."""
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
-    (projects_dir / "projects_001.json").write_text(
-        """[
+    (projects_dir / "projects_001.json").write_text("""[
           {
             "name": "demo",
             "_source_id": 10,
@@ -42,8 +41,7 @@ async def test_patch_returns_patched_count(tmp_path: Path) -> None:
               "scm_branch": "main"
             }
           }
-        ]"""
-    )
+        ]""")
 
     ctx = _make_patch_test_ctx()
     ctx.migration_state.get_mapped_id = MagicMock(return_value=99)
@@ -71,8 +69,7 @@ async def test_patch_returns_patched_count(tmp_path: Path) -> None:
 async def test_patch_restores_git_refspec(tmp_path: Path) -> None:
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
-    (projects_dir / "projects_001.json").write_text(
-        """[
+    (projects_dir / "projects_001.json").write_text("""[
           {
             "name": "demo",
             "_source_id": 10,
@@ -80,11 +77,11 @@ async def test_patch_restores_git_refspec(tmp_path: Path) -> None:
               "scm_type": "git",
               "scm_url": "https://example.com/repo.git",
               "scm_branch": "main",
-              "scm_refspec": "+refs/pull/*:refs/remotes/origin/pr/*"
+              "scm_refspec": "+refs/pull/*:refs/remotes/origin/pr/*",
+              "scm_track_submodules": true
             }
           }
-        ]"""
-    )
+        ]""")
 
     ctx = _make_patch_test_ctx()
 
@@ -101,13 +98,13 @@ async def test_patch_restores_git_refspec(tmp_path: Path) -> None:
 
     patch_data = ctx.target_client.patch.await_args.kwargs["json_data"]
     assert patch_data["scm_refspec"] == "+refs/pull/*:refs/remotes/origin/pr/*"
+    assert patch_data["scm_track_submodules"] is True
 
 
 def _make_patch_test_project_file(tmp_path: Path) -> None:
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
-    (projects_dir / "projects_001.json").write_text(
-        """[
+    (projects_dir / "projects_001.json").write_text("""[
           {
             "name": "demo",
             "_source_id": 10,
@@ -117,8 +114,7 @@ def _make_patch_test_project_file(tmp_path: Path) -> None:
               "scm_branch": "main"
             }
           }
-        ]"""
-    )
+        ]""")
 
 
 def _make_patch_test_ctx(*, mapped_id: int | None = 99) -> MagicMock:

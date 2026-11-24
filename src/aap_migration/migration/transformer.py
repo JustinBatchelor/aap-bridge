@@ -1483,6 +1483,7 @@ class ProjectTransformer(DataTransformer):
                     "scm_refspec": data.get("scm_refspec", ""),
                     "scm_clean": data.get("scm_clean", False),
                     "scm_delete_on_update": data.get("scm_delete_on_update", False),
+                    "scm_track_submodules": data.get("scm_track_submodules", False),
                     "scm_update_on_launch": data.get("scm_update_on_launch", False),
                     "scm_update_cache_timeout": data.get("scm_update_cache_timeout", 0),
                     "credential": data.get("credential"),  # Keep source credential ID
@@ -1497,6 +1498,7 @@ class ProjectTransformer(DataTransformer):
                     "scm_refspec",
                     "scm_clean",
                     "scm_delete_on_update",
+                    "scm_track_submodules",
                     "scm_update_on_launch",
                     "scm_update_cache_timeout",
                     "credential",

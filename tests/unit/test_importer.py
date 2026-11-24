@@ -27,6 +27,7 @@ from aap_migration.migration.importer import (
     create_importer,
 )
 from aap_migration.migration.state import MigrationState
+from aap_migration.migration.transformer import ProjectTransformer
 
 
 @pytest.fixture
@@ -781,6 +782,36 @@ class TestCredentialTypeImporter:
 
 class TestProjectImporter:
     """Tests for ProjectImporter."""
+
+    @pytest.mark.asyncio
+    async def test_deferred_submodule_project_creates_manual_without_scm_calls(
+        self, mock_client, mock_state, performance_config
+    ):
+        project = ProjectTransformer().transform_resource(
+            "projects",
+            {
+                "id": 330,
+                "name": "synthetic-submodule-project",
+                "organization": 4,
+                "scm_type": "git",
+                "scm_url": "https://example.invalid/repo.git",
+                "scm_track_submodules": True,
+                "credential": 7,
+            },
+        )
+        mock_state.get_mapped_id.return_value = 40
+        importer = ProjectImporter(mock_client, mock_state, performance_config)
+        result = await importer.import_resource("projects", 330, project)
+        assert result["id"] == 100
+        payload = mock_client.create_resource.await_args.kwargs["data"]
+        assert payload["scm_type"] == ""
+        assert payload["scm_url"] == ""
+        assert "credential" not in payload
+        assert "scm_track_submodules" not in payload
+        assert "_deferred_scm_details" not in payload
+        mock_client.get.assert_not_awaited()
+        mock_client.update_resource.assert_not_awaited()
+        mock_state.mark_completed.assert_called_once()
 
     @pytest.fixture
     def project_importer(self, mock_client, mock_state, performance_config):
