@@ -71,6 +71,7 @@ def load_tree(root):
     if root.is_symlink() or not root.is_dir():
         raise ExportUpdateError("Input must be a real transformed directory.")
     snapshots, chunks, records = {}, {}, {}
+    locations, fingerprints, repeats = {}, {}, {}
     for directory, directories, files in os.walk(str(root), followlinks=False):
         parent = Path(directory)
         if any((parent / name).is_symlink() for name in directories):
@@ -92,16 +93,37 @@ def load_tree(root):
                 raise ExportUpdateError(f"Expected resource arrays in {relative}.")
             resource_type = canonical(parent.name)
             chunks[relative] = (resource_type, rows)
-            for row in rows:
+            for position, row in enumerate(rows, 1):
                 if resource_type not in GRAPH_TYPES:
                     continue
                 sid = source_id(row, str(relative))
                 if sid is None:
                     raise ExportUpdateError(f"Missing source ID in {relative}.")
                 key = (resource_type, sid)
+                location = f"{relative} record {position}"
+                fingerprint = json.dumps(row, sort_keys=True)
                 if key in records:
-                    raise ExportUpdateError(f"Duplicate source ID for {resource_type}: {sid}.")
+                    if fingerprints[key] != fingerprint:
+                        previous = records[key]
+                        fields = sorted(
+                            field
+                            for field in set(previous) | set(row)
+                            if field not in previous
+                            or field not in row
+                            or json.dumps(previous[field], sort_keys=True)
+                            != json.dumps(row[field], sort_keys=True)
+                        )
+                        raise ExportUpdateError(
+                            f"Conflicting duplicate source ID for {resource_type}: {sid}. "
+                            f"Locations: {locations[key]}; {location}. "
+                            f"Differing fields: {', '.join(fields)}. "
+                            "No values displayed; input files unchanged."
+                        )
+                    repeats[key] = repeats.get(key, 0) + 1
+                    continue
                 records[key] = row
+                locations[key] = location
+                fingerprints[key] = fingerprint
     metadata = parse_json(snapshots.get(Path("metadata.json"), b"null"), "metadata.json")
     if not isinstance(metadata, dict) or "transform_timestamp" not in metadata:
         raise ExportUpdateError("Input must contain transformed metadata.json, not raw exports.")
@@ -111,7 +133,7 @@ def load_tree(root):
         raise ExportUpdateError(
             "Input is already filtered; use the original transformed directory."
         )
-    return snapshots, chunks, records, metadata
+    return snapshots, chunks, records, metadata, repeats
 
 
 def reference(resource_type, value, label):
@@ -238,7 +260,7 @@ def grant_reference(grant, excluded):
 
 
 def prepare(root, project_name, project_id):
-    snapshots, chunks, records, metadata = load_tree(root)
+    snapshots, chunks, records, metadata, repeats = load_tree(root)
     projects = [(key, row) for key, row in records.items() if key[0] == "projects"]
     matches = [
         (key, row)
@@ -276,6 +298,10 @@ def prepare(root, project_name, project_id):
             for kind, sid in sorted(excluded)
         ],
         "removed_role_grants": 0,
+        "identical_repeated_records": [
+            {"resource_type": kind, "source_id": sid, "extra_occurrences": count}
+            for (kind, sid), count in sorted(repeats.items())
+        ],
         "policy": "Exclude whole dependent inventories/workflows; smart inventories conservatively depend on all exported inventories. Static references only; custom variables and external automation require review.",
         "target_changes": "None. Existing target objects, jobs, and migration mappings are not modified.",
     }
@@ -393,6 +419,13 @@ def main(argv=None):
         if output.exists() or args.output.is_symlink():
             raise ExportUpdateError("Output already exists; choose a new path.")
         snapshots, updated, report = prepare(root, args.project_name, args.project_id)
+        for item in report["identical_repeated_records"]:
+            print(
+                "Identical repeat: {} source {} | {} extra occurrence(s); "
+                "all copies follow the same exclusion decision.".format(
+                    item["resource_type"], item["source_id"], item["extra_occurrences"]
+                )
+            )
         for item in report["excluded"]:
             print(
                 "Exclude {} source {} | {} | {}".format(

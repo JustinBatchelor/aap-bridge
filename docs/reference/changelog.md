@@ -12,6 +12,8 @@ in the repository.
 
 **New Features:**
 
+- Accept identical repeated source records during offline project exclusion while
+  rejecting conflicting duplicates with private, location-specific diagnostics.
 - Offline project exclusion with a reviewed, private filtered copy of transformed
   data, transitive automation filtering, and a CLI Phase 2 recovery procedure.
 - Fixed deferred project submodule tracking during Manual creation and Phase 2 restoration,

@@ -137,6 +137,8 @@ pre-commit / CI via `tools/check_changelog_periods.py` on this file and
 
 ### Fixed
 
+- Accept identical repeated source records during offline project exclusion while
+  rejecting conflicting duplicates with private, location-specific diagnostics.
 - Defer project submodule tracking during Manual creation and restore it in Phase 2,
   with offline repair of existing transformed projects and a CLI recovery procedure.
 - **Projects – Git SCM Refspec (#180)**: Git project `scm_refspec` is retained in deferred

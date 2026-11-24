@@ -67,6 +67,14 @@ Custom variables, playbook content, and external launchers need your review;
 the helper cannot infer their dependencies. Ambiguous template references or
 invalid JSON stop the operation instead of guessing.
 
+Repeated source IDs are accepted only when the parsed records are identical.
+The preview and report list these repeats; all copies receive the same exclusion
+decision, and kept copies remain in their original chunks. This does not clean up
+or deduplicate export data. If duplicate records differ, the helper stops before
+creating output and reports both chunk locations and differing field names, never
+their values. Review those records locally before proceeding; do not delete a
+chunk or bypass the check merely to continue the import.
+
 ## 3. Create the filtered copy
 
 Only after accepting the preview:

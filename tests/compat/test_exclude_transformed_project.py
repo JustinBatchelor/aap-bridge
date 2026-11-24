@@ -255,6 +255,70 @@ class ProjectExclusionTests(unittest.TestCase):
         self.assertEqual(report["project"]["name"], "ADO")
         self.assertEqual(report["removed_counts"]["workflow_job_templates"], 6)
 
+    def test_identical_group_duplicates_are_preserved_or_excluded_together(self):
+        self.data["groups"] += [dict(group) for group in self.data["groups"]]
+        self.write_tree()
+        original = self.snapshot()
+        self.assertEqual(self.invoke(apply=False), 0)
+        self.assertIn("Identical repeat: groups source 70", self.text)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(self.invoke(), 0)
+        self.assertEqual([group["_source_id"] for group in self.kept("groups")], [71, 71])
+        self.assertEqual(self.snapshot(), original)
+        report = json.loads((self.output / "project-exclusion-report.json").read_text())
+        self.assertEqual(report["removed_counts"]["groups"], 2)
+        self.assertEqual(
+            report["identical_repeated_records"],
+            [
+                {"resource_type": "groups", "source_id": 70, "extra_occurrences": 1},
+                {"resource_type": "groups", "source_id": 71, "extra_occurrences": 1},
+            ],
+        )
+        metadata = json.loads((self.output / "metadata.json").read_text())
+        self.assertEqual(metadata["resource_types"]["groups"]["transformed_count"], 2)
+        self.assertEqual(metadata["resource_types"]["groups"]["input_count"], 4)
+
+    def test_identical_repeats_across_chunks_do_not_select_or_deduplicate_rows(self):
+        second_chunk = self.root / "groups/groups_0002.json"
+        second_chunk.write_text(json.dumps(self.data["groups"], sort_keys=True))
+        original = self.snapshot()
+        self.assertEqual(self.invoke(), 0)
+        copied = json.loads((self.output / "groups/groups_0002.json").read_text())
+        self.assertEqual(copied, [self.data["groups"][1]])
+        self.assertEqual(self.kept("groups"), copied)
+        self.assertEqual(self.snapshot(), original)
+
+    def test_identical_project_repeat_selects_once_and_removes_every_copy(self):
+        self.data["projects"].append(dict(self.data["projects"][0]))
+        self.write_tree()
+        self.assertEqual(self.invoke(), 0)
+        self.assertEqual(self.ids("projects"), {11, 12})
+        report = json.loads((self.output / "project-exclusion-report.json").read_text())
+        self.assertEqual(report["removed_counts"]["projects"], 2)
+
+    def test_conflicting_duplicate_reports_locations_and_fields_without_values(self):
+        duplicate = dict(self.data["groups"][0])
+        duplicate["inventory"] = 101
+        duplicate["variables"] = "synthetic-secret-never-log"
+        (self.root / "groups/groups_0002.json").write_text(json.dumps([duplicate]))
+        original = self.snapshot()
+        self.assertEqual(self.invoke(), 1)
+        self.assertIn("Conflicting duplicate source ID for groups: 70", self.text)
+        self.assertIn("groups/groups_0001.json record 1", self.text)
+        self.assertIn("groups/groups_0002.json record 1", self.text)
+        self.assertIn("Differing fields: inventory, variables", self.text)
+        self.assertEqual(self.snapshot(), original)
+        self.assertFalse(self.output.exists())
+
+    def test_duplicate_boolean_and_number_are_not_treated_as_identical(self):
+        self.data["groups"][0]["enabled"] = True
+        duplicate = dict(self.data["groups"][0], enabled=1)
+        self.data["groups"].append(duplicate)
+        self.write_tree()
+        self.assertEqual(self.invoke(), 1)
+        self.assertIn("Differing fields: enabled", self.text)
+        self.assertFalse(self.output.exists())
+
     def test_exact_name_does_not_exclude_ado_version(self):
         self.assertEqual(self.invoke(selection=["--project-id", "10"]), 0)
         self.assertIn(11, self.ids("projects"))
